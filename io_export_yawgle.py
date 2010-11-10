@@ -28,17 +28,17 @@ def _formatnum(n):
   if s[-1] == '.': s = s[:-1]
   return s
 
-def RSHash(key):
+def _rshash(key):
   a = 378551
   b = 63689
   hash = 0
   for i in range(len(key)):
-    hash = hash * a + key[i]
+    hash = hash * a + int(key[i]*1000)
     a = a * b
-  return hash
+  return hash & 0xFFFFFFFF
 
 def _vertex_index(vertexdata, data, datamap):
-  key = RSHash(vertexdata)
+  key = _rshash(vertexdata)
   index = -1
   try:
     for i,datum in datamap[key]:
@@ -61,22 +61,21 @@ def _json_MESH(mesh):
     swizzle = [2, 1, 0] if len(face.vertices) == 3 else [ 2, 1, 0, 3, 2, 0 ]
     for s in swizzle:
       datum = []
-      datum += mesh.vertices[face.vertices[s]].co[0:3]
-      datum += mesh.vertices[face.vertices[s]].normal[0:3]
       if len(mesh.uv_textures):
         for t in mesh.uv_textures:
           if t.data[face.index]:
             datum += t.data[face.index].uv[s][0:2]
             break
-      else:
-        datum += [0,0]
+      else: datum += [0,0]
+      datum += mesh.vertices[face.vertices[s]].co[0:3]
+      datum += mesh.vertices[face.vertices[s]].normal[0:3]
       indices.append(_vertex_index(datum, data, datamap))
 
   s = ''
 
   # Vertices, normals, texcoords.
   for name, positions in [
-    ('vertices', [0, 1, 2]), ('normals', [3, 4, 5]), ('texcoords', [6, 7])
+    ('texcoords', [0, 1]), ('vertices', [2, 3, 4]), ('normals', [5, 6, 7])
   ]:
     first = True
     s += ',"%s":[' % (name)
