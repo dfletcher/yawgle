@@ -27,11 +27,7 @@ def _formatnum(n):
   if s[-1] == '.': s = s[:-1]
   return s
 
-def _json_MESH(obj, attrs):
-
-  print("output mesh: %s " % (obj.name))
-
-  mesh = obj.create_mesh(bpy.context.scene, True, 'PREVIEW')
+def _json_MESH(mesh):
 
   data = []
   indices = []
@@ -42,7 +38,10 @@ def _json_MESH(obj, attrs):
       datum += mesh.vertices[face.vertices[s]].co[0:3]
       datum += mesh.vertices[face.vertices[s]].normal[0:3]
       if len(mesh.uv_textures):
-        datum += mesh.uv_textures[0].data[face.index].uv[s][0:2]
+        for t in mesh.uv_textures:
+          if t.data[face.index]:
+            datum += t.data[face.index].uv[s][0:2]
+            break
       else:
         datum += [0,0]
       try: index = data.index(datum)
@@ -146,20 +145,26 @@ class JSExporter(bpy.types.Operator):
     jscode += '\n  // Javascript objects\n'
     for obj in bpy.data.objects:
       if obj.type != 'MESH': continue
+      if len(obj.data.faces) == 0: continue
       objname = _clean_name(obj.name)
       mesh = obj.data
-      if len(mesh.uv_textures):
-        image = _clean_name(os.path.basename(
-        mesh.uv_textures[0].data[0].image.filepath
-      ))
-      else:
-        image = 'null';
+      image = 'null';
+      for t in mesh.uv_textures:
+        for d in t.data:
+          image = _clean_name(os.path.basename(
+            mesh.uv_textures[0].data[0].image.filepath
+          ))
+          break
       jscode += '  parent.meshes["%s"] = new Mesh({\n' % (objname)
-      jscode += '    "translate": [%f, %f, %f],\n' % (obj.location[0], obj.location[1], obj.location[2])
+      jscode += '    "translate": [%f, %f, %f],\n' % (
+        obj.location[0],
+        obj.location[1],
+        obj.location[2]
+      )
       jscode += '    "rotate": [%f, %f, %f],\n' % (
         math.degrees(obj.rotation_euler[0]),
-      math.degrees(obj.rotation_euler[1]),
-      math.degrees(obj.rotation_euler[2])
+        math.degrees(obj.rotation_euler[1]),
+        math.degrees(obj.rotation_euler[2])
       )
       jscode += '    "scale": [%f, %f, %f],\n' % (obj.scale[0], obj.scale[1], obj.scale[2])
       jscode += '    "texture image": "%s"\n' % image
@@ -170,37 +175,30 @@ class JSExporter(bpy.types.Operator):
     for obj in bpy.data.objects:
       if obj.type != 'MESH': continue
       if len(obj.data.faces) == 0: continue
+      mesh = obj.create_mesh(bpy.context.scene, True, 'PREVIEW')
       dataname = _clean_name(obj.data.name)
       jsonfile = os.path.join(jsdir, "%s.json" % (dataname))
       jsonpath = "js/%s.json" % (dataname)
-      attrs = {
-        'basename': basename,
-        'jsfile': jsfile,
-        'jsonfile': jsonfile,
-        'jsonpath': jsonpath,
-        'filepath': self.filepath,
-        'filename': self.filename,
-        'directory': self.directory,
-        'classname': classname
-      }
       if not jsonpath in loaded:
+        print("output mesh: %s " % (dataname))
         loaded.append(jsonpath)
         json = '{'
         json += '"name": "%s"' % (dataname)
-        json += _json_MESH(obj, attrs)
+        json += _json_MESH(mesh)
         json += '}\n'
         jscode += '  loader.loadJSONData("%s", function(data) {\n' % (jsonpath)
         jscode += '    var vbo = parent.vboCallback(data, parent.vboArgs);\n'
         for obj2 in bpy.data.objects:
-          if obj2.data.name == obj.data.name:
+          if obj2.type != 'MESH': continue
+          if obj2.data and obj2.data.name == obj.data.name:
             data2name = _clean_name(obj2.name)
             jscode += '    parent.meshes["%s"].vbo = vbo;\n' % (data2name)
         jscode += '  });\n'
 
-      f = open(os.path.join(self.directory, jsonfile), 'w')
-      if not f: raise ('Could not open file for writing.')
-      f.write(json)
-      f.close()
+        f = open(os.path.join(self.directory, jsonfile), 'w')
+        if not f: raise ('Could not open file for writing.')
+        f.write(json)
+        f.close()
 
     jscode += '\n}\n'
 
