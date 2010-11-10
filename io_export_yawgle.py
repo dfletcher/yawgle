@@ -28,8 +28,17 @@ def _formatnum(n):
   if s[-1] == '.': s = s[:-1]
   return s
 
+def RSHash(key):
+  a = 378551
+  b = 63689
+  hash = 0
+  for i in range(len(key)):
+    hash = hash * a + key[i]
+    a = a * b
+  return hash
+
 def _vertex_index(vertexdata, data, datamap):
-  key = reduce(lambda x,y: x*y, vertexdata)
+  key = RSHash(vertexdata)
   index = -1
   try:
     for i,datum in datamap[key]:
