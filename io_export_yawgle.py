@@ -7,6 +7,7 @@
 
 from bpy.props import *
 from mathutils import *
+from functools import reduce
 import os, os.path, errno, bpy, math
 
 bl_addon_info = {
@@ -27,10 +28,26 @@ def _formatnum(n):
   if s[-1] == '.': s = s[:-1]
   return s
 
+def _vertex_index(vertexdata, data, datamap):
+  key = reduce(lambda x,y: x*y, vertexdata)
+  index = -1
+  try:
+    for i,datum in datamap[key]:
+      if datum == vertexdata:
+        index = i
+        break
+  except KeyError: datamap[key] = []
+  if index == -1:
+    index = len(data)
+    data.append(vertexdata)
+    datamap[key].append((index, vertexdata))
+  return index
+
 def _json_MESH(mesh):
 
   data = []
   indices = []
+  datamap = {}
   for face in mesh.faces:
     swizzle = [2, 1, 0] if len(face.vertices) == 3 else [ 2, 1, 0, 3, 2, 0 ]
     for s in swizzle:
@@ -44,11 +61,7 @@ def _json_MESH(mesh):
             break
       else:
         datum += [0,0]
-      try: index = data.index(datum)
-      except ValueError:
-        index = len(data)
-        data.append(datum)
-      indices.append(index)
+      indices.append(_vertex_index(datum, data, datamap))
 
   s = ''
 
