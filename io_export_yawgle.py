@@ -1794,7 +1794,7 @@ HTML = """<html>
         }
 
         // Load scene.
-        var scene = new BoardClass ({
+        var scene = new ${{SCENECLASSNAME}} ({
           'texture callback': renderer.standardTexture,
           'texture arguments': [ renderer.gl ],
           'vbo callback': renderer.standardVBO,
