@@ -248,7 +248,13 @@ class JSExporter(bpy.types.Operator):
 
     if not os.path.isfile(self.filepath):
       f = open(self.filepath, 'w')
-      f.write(HTML.replace('${{SCENECLASSNAME}}', classname))
+      f.write(
+        HTML.replace(
+          '${{SCENECLASSNAME}}', classname
+        ).replace(
+          "${{SCENEFILE}}", jspath
+        )
+      )
       f.close()
 
     return {'FINISHED'}
@@ -1732,7 +1738,7 @@ HTML = """<html>
     <script type='text/javascript' src='js/J3DIMath.js'></script>
     <script type='text/javascript' src='js/webgl-jso-jqueryloader.js'></script>
     <script type='text/javascript' src='js/webgl-jso-basicrenderer.js'></script>
-    <script type='text/javascript' src='js/board.js'></script>
+    <script type='text/javascript' src='${{SCENEFILE}}'></script>
     <script id='vprog' type='x-shader/x-vertex'>
       uniform mat4 u_modelViewMatrix;
       uniform mat4 u_objectMatrix;
