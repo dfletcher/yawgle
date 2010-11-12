@@ -279,8 +279,7 @@ if __name__ == '__main__':
 #   Templates
 # -----------------------------------------------------------------------------
 
-J3DIMATH = """
-/*
+J3DIMATH = """/*
  * Copyright (C) 2009 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1347,8 +1346,7 @@ J3DIVector3.prototype.toString = function()
 }
 """
 
-LOADER = """
-// TODO: header
+LOADER = """// TODO: header
 
 // ----------------------------
 // JQueryLoader
@@ -1428,12 +1426,9 @@ JQueryLoader.prototype.loadTexture = function(
       loader.response();
     });
 }
-
 """
 
-RENDERER = """
-
-var tmptexture;
+RENDERER = """// TODO: header
 
 function BasicRenderer(params) {
 
@@ -1491,14 +1486,19 @@ function BasicRenderer(params) {
   ), 0);
   this.gl.enable(this.gl.TEXTURE_2D);
   this.gl.mvMatrix = new J3DIMatrix4();
+  this.gl.normalMatrix = new J3DIMatrix4();
   this.gl.u_normalMatrixLoc = this.gl.getUniformLocation(
     this.gl.program, params['normal matrix variable']
   );
-  this.gl.normalMatrix = new J3DIMatrix4();
-  this.gl.u_modelViewProjMatrixLoc = this.gl.getUniformLocation(
-    this.gl.program, params['mvp matrix variable']
+  this.gl.u_modelViewMatrixLoc = this.gl.getUniformLocation(
+    this.gl.program, params['modelview matrix variable']
   );
-  this.gl.mvpMatrix = new J3DIMatrix4();
+  this.gl.u_projMatrixLoc = this.gl.getUniformLocation(
+    this.gl.program, params['projection matrix variable']
+  );
+  this.gl.u_objectMatrixLoc = this.gl.getUniformLocation(
+    this.gl.program, params['object matrix variable']
+  );
 }
 
 BasicRenderer.prototype.getShader = function(id) {
@@ -1534,10 +1534,10 @@ BasicRenderer.prototype.reshape = function(width, height) {
   var wd2 = width / 2.0;
   var hd2 = height / 2.0;
   this.gl.viewport(0-wd2, hd2, wd2, 0-hd2);
-  //this.gl.viewport(0, 0, width, height);
   this.gl.perspectiveMatrix = new J3DIMatrix4();
   this.gl.perspectiveMatrix.perspective(30, width/height, 1, 10000);
   this.gl.perspectiveMatrix.lookat(0, 0, 7, 0, 0, 0, 0, 1, 0);
+  this.gl.perspectiveMatrix.setUniform(this.gl, this.gl.u_projMatrixLoc, false);
   this.gl.mvMatrix.makeIdentity();
   this.gl.mvMatrix.translate(0,-1,0);
   this.gl.mvMatrix.rotate(-65, 1,0,0);
@@ -1566,15 +1566,6 @@ BasicRenderer.prototype.standardVBO = function(data, args) {
 
   var gl = args[0];
   var vbo = new StandardVBO();
-
-  /*if (
-    !data["vertices"] ||
-    !data["normals"] ||
-    !data["texcoords"] ||
-    !data["indices"]
-  ) {
-    return vbo;
-  }*/
 
   // Create vertex VBO.
   vbo.vertexData = data["vertices"];
@@ -1615,49 +1606,50 @@ BasicRenderer.prototype.standardVBO = function(data, args) {
 
   // Accounting.
   vbo.vertexCount = vbo.indicesData.length;
-  vbo.complete = true;
-
-  //alert(vbo.vertexCount + ' complete');
 
   return vbo;
 }
 
+var lastboundtexture = -1;
+var lastboundvbo = -1;
 BasicRenderer.prototype.renderMesh = function(vbo, texture) {
-  if (!vbo.bind(this.gl)) return;
-  this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+  if (vbo.id != lastboundvbo) {
+    if (!vbo.bind(this.gl)) return;
+    lastboundvbo = vbo.id;
+  }
+  if (texture != lastboundtexture) {
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    lastboundtexture = texture;
+  }
   this.gl.drawElements(this.gl.TRIANGLES, vbo.vertexCount, this.gl.UNSIGNED_SHORT, 0);
-  vbo.unbind(this.gl);
 }
 
 BasicRenderer.prototype.render = function(scene) {
   this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
   this.gl.mvMatrix.rotate(.5, 0,0,1);
+  this.gl.mvMatrix.setUniform(this.gl, this.gl.u_modelViewMatrixLoc, false);
   for (i in scene.meshes) {
-    if (i == 'Cylinder_016') continue;
     var mesh = scene.meshes[i];
-    this.gl.mvpMatrix.load(this.gl.perspectiveMatrix);
-    this.gl.mvpMatrix.multiply(this.gl.mvMatrix);
-    if (!mesh.modelMatrix) {
-      mesh.modelMatrix = new J3DIMatrix4();
-      mesh.modelMatrix.translate(mesh.translate[0], mesh.translate[1], mesh.translate[2])
-      mesh.modelMatrix.rotate(mesh.rotate[2], 0.0, 0.0, 1.0);
-      mesh.modelMatrix.rotate(mesh.rotate[1], 0.0, 1.0, 0.0);
-      mesh.modelMatrix.rotate(mesh.rotate[0], 1.0, 0.0, 0.0);
-      mesh.modelMatrix.scale(mesh.scale[0], mesh.scale[1], mesh.scale[2])
+    if (!mesh.objectMatrix) {
+      mesh.objectMatrix = new J3DIMatrix4();
+      mesh.objectMatrix.translate(mesh.translate[0], mesh.translate[1], mesh.translate[2])
+      mesh.objectMatrix.rotate(mesh.rotate[2], 0.0, 0.0, 1.0);
+      mesh.objectMatrix.rotate(mesh.rotate[1], 0.0, 1.0, 0.0);
+      mesh.objectMatrix.rotate(mesh.rotate[0], 1.0, 0.0, 0.0);
+      mesh.objectMatrix.scale(mesh.scale[0], mesh.scale[1], mesh.scale[2])
       mesh.texture = scene.textures[mesh.textureID];
     }
-    this.gl.mvpMatrix.multiply(mesh.modelMatrix);
-    this.gl.mvpMatrix.setUniform(this.gl, this.gl.u_modelViewProjMatrixLoc, false);
+    mesh.objectMatrix.setUniform(this.gl, this.gl.u_objectMatrixLoc, false);
     this.renderMesh(mesh.vbo, mesh.texture);
   }
 }
 
+last_vbo_id = 0;
 function StandardVBO() {
-  this.complete = false;
+  this.id = ++last_vbo_id;
 }
 
 StandardVBO.prototype.bind = function(gl) {
-  //if (!this.complete) return false;
   gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexObject);
   gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
   gl.bindBuffer(gl.ARRAY_BUFFER, this.normalsObject);
@@ -1667,17 +1659,9 @@ StandardVBO.prototype.bind = function(gl) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indicesObject);
   return true;
 }
-
-StandardVBO.prototype.unbind = function(gl) {
-  if (!this.complete) return;
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-}
-
 """
 
-HTML = """
-<html>
+HTML = """<html>
   <head>
     <title>Blender -> JSO WebGL Example</title>
     <style type='text/css'>
@@ -1750,8 +1734,10 @@ HTML = """
     <script type='text/javascript' src='js/webgl-jso-basicrenderer.js'></script>
     <script type='text/javascript' src='js/board.js'></script>
     <script id='vprog' type='x-shader/x-vertex'>
-      uniform mat4 u_modelViewProjMatrix;
+      uniform mat4 u_modelViewMatrix;
+      uniform mat4 u_objectMatrix;
       uniform mat4 u_normalMatrix;
+      uniform mat4 u_projMatrix;
       uniform vec3 lightDir;
       attribute vec3 vNormal;
       attribute vec2 vTexCoord;
@@ -1759,10 +1745,10 @@ HTML = """
       varying float v_Dot;
       varying vec2 v_texCoord;
       void main() {
-        gl_Position = u_modelViewProjMatrix * vPosition;
+        gl_Position = u_projMatrix * u_modelViewMatrix * u_objectMatrix * vPosition;
         v_texCoord = vTexCoord.st;
         vec4 transNormal = u_normalMatrix * vec4(vNormal, 1);
-        v_Dot = max(dot(transNormal.xyz, lightDir), 0.0);
+        v_Dot = max(dot(transNormal.xyz, lightDir), 0.5);
       }
     </script>
     <script id='fprog' type='x-shader/x-fragment'>
@@ -1775,7 +1761,8 @@ HTML = """
       void main() {
         vec2 texCoord = vec2(v_texCoord.s, 1.0 - v_texCoord.t);
         vec4 color = texture2D(sampler2d, texCoord);
-        color += vec4(0.2, 0.2, 0.2, 1.0);
+        //color *= vec4(2.0, 2.0, 2.0, 0.0);
+        color.a = 1.0;
         gl_FragColor = vec4(color.xyz * v_Dot, color.a);
       }
     </script>
@@ -1790,10 +1777,12 @@ HTML = """
           'clear color': [ 0.97, 0.97, 0.97, 1 ],
           'vertex program id': 'vprog',
           'fragment program id': 'fprog',
-        'light variable': 'lightDir',
-        'sampler2d variable': 'sampler2d',
-        'normal matrix variable': 'u_normalMatrix',
-        'mvp matrix variable': 'u_modelViewProjMatrix',
+          'light variable': 'lightDir',
+          'sampler2d variable': 'sampler2d',
+          'normal matrix variable': 'u_normalMatrix',
+          'object matrix variable': 'u_objectMatrix',
+          'modelview matrix variable': 'u_modelViewMatrix',
+          'projection matrix variable': 'u_projMatrix',
           'vertex attribute names': [ 'vNormal', 'vTexCoord', 'vPosition' ],
         });
 
@@ -1805,7 +1794,7 @@ HTML = """
         }
 
         // Load scene.
-        var scene = new ${{SCENECLASSNAME}} ({
+        var scene = new BoardClass ({
           'texture callback': renderer.standardTexture,
           'texture arguments': [ renderer.gl ],
           'vbo callback': renderer.standardVBO,
@@ -1838,5 +1827,4 @@ HTML = """
     </script>
   </body>
 </html>
-
 """
