@@ -1708,9 +1708,6 @@ HTML = """<html>
         border: 1px solid black;
         margin: 32px auto;
       }
-      #canvas3d {
-        padding-left: 1px; /* unsure why this is needed for minefield */
-      }
       #no-canvas3d P {
         text-align: center;
         margin-top: 64px;
@@ -1754,7 +1751,7 @@ HTML = """<html>
         gl_Position = u_projMatrix * u_modelViewMatrix * u_objectMatrix * vPosition;
         v_texCoord = vTexCoord.st;
         vec4 transNormal = u_normalMatrix * vec4(vNormal, 1);
-        v_Dot = max(dot(transNormal.xyz, lightDir), 0.5);
+        v_Dot = max(dot(transNormal.xyz, lightDir), 0.65);
       }
     </script>
     <script id='fprog' type='x-shader/x-fragment'>
