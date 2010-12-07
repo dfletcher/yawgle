@@ -213,7 +213,7 @@ class JSExporter(bpy.types.Operator):
           if obj2.type != 'MESH': continue
           if obj2.data and obj2.data.name == obj.data.name:
             data2name = _clean_name(obj2.name)
-            jscode += '    parent.meshes["%s"].vbo = vbo;\n' % (data2name)
+            jscode += '    parent.meshes["%s"].vbo = vbo;\n' % data2name
         jscode += '  });\n'
 
         f = open(os.path.join(self.directory, jsonfile), 'w')
@@ -221,17 +221,17 @@ class JSExporter(bpy.types.Operator):
         f.write(json)
         f.close()
 
-    jscode += '\n}\n'
+    jscode += '}\n'
 
     f = open(jsfile, 'w')
     if not f: raise ('Could not open file for writing.')
     f.write(jscode)
     f.close()
 
-    j3dimath = os.path.join(jsdir, 'J3DIMath.js')
-    if not os.path.isfile(j3dimath):
-      f = open(j3dimath, 'w')
-      f.write(J3DIMATH)
+    mathlib = os.path.join(jsdir, 'glMatrix.js')
+    if not os.path.isfile(mathlib):
+      f = open(mathlib, 'w')
+      f.write(MATHLIB)
       f.close()
 
     loader = os.path.join(jsdir, 'webgl-jso-jqueryloader.js')
@@ -285,1071 +285,1728 @@ if __name__ == '__main__':
 #   Templates
 # -----------------------------------------------------------------------------
 
-J3DIMATH = """/*
- * Copyright (C) 2009 Apple Inc. All Rights Reserved.
+MATHLIB = """/* 
+ * glMatrix.js - High performance matrix and vector operations for WebGL
+ * version 0.9.5
+ */
+ 
+/*
+ * Copyright (c) 2010 Brandon Jones
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
+ * This software is provided 'as-is', without any express or implied
+ * warranty. In no event will the authors be held liable for any damages
+ * arising from the use of this software.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE INC. OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Permission is granted to anyone to use this software for any purpose,
+ * including commercial applications, and to alter it and redistribute it
+ * freely, subject to the following restrictions:
+ *
+ *    1. The origin of this software must not be misrepresented; you must not
+ *    claim that you wrote the original software. If you use this software
+ *    in a product, an acknowledgment in the product documentation would be
+ *    appreciated but is not required.
+ *
+ *    2. Altered source versions must be plainly marked as such, and must not
+ *    be misrepresented as being the original software.
+ *
+ *    3. This notice may not be removed or altered from any source
+ *    distribution.
  */
 
- // J3DI (Jedi) - A support library for WebGL.
+// Fallback for systems that don't support WebGL
+if(typeof Float32Array != 'undefined') {
+	glMatrixArrayType = Float32Array;
+} else if(typeof WebGLFloatArray != 'undefined') {
+	glMatrixArrayType = WebGLFloatArray; // This is officially deprecated and should dissapear in future revisions.
+} else {
+	glMatrixArrayType = Array;
+}
 
 /*
-    J3DI Math Classes. Currently includes:
-
-        J3DIMatrix4 - A 4x4 Matrix
-*/
+ * vec3 - 3 Dimensional Vector
+ */
+var vec3 = {};
 
 /*
-    J3DIMatrix4 class
+ * vec3.create
+ * Creates a new instance of a vec3 using the default array type
+ * Any javascript array containing at least 3 numeric elements can serve as a vec3
+ *
+ * Params:
+ * vec - Optional, vec3 containing values to initialize with
+ *
+ * Returns:
+ * New vec3
+ */
+vec3.create = function(vec) {
+	var dest = new glMatrixArrayType(3);
+	
+	if(vec) {
+		dest[0] = vec[0];
+		dest[1] = vec[1];
+		dest[2] = vec[2];
+	}
+	
+	return dest;
+};
 
-    This class implements a 4x4 matrix. It has functions which duplicate the
-    functionality of the OpenGL matrix stack and glut functions. On browsers
-    that support it, CSSMatrix is used to accelerate operations.
-
-    IDL:
-
-    [
-        Constructor(in J3DIMatrix4 matrix),                 // copy passed matrix into new J3DIMatrix4
-        Constructor(in sequence<float> array)               // create new J3DIMatrix4 with 16 floats (row major)
-        Constructor()                                       // create new J3DIMatrix4 with identity matrix
-    ]
-    interface J3DIMatrix4 {
-        void load(in J3DIMatrix4 matrix);                   // copy the values from the passed matrix
-        void load(in sequence<float> array);                // copy 16 floats into the matrix
-        sequence<float> getAsArray();                       // return the matrix as an array of 16 floats
-        Float32Array getAsFloat32Array();             // return the matrix as a Float32Array with 16 values
-        void setUniform(in WebGLRenderingContext ctx,       // Send the matrix to the passed uniform location in the passed context
-                        in WebGLUniformLocation loc,
-                        in boolean transpose);
-        void makeIdentity();                                // replace the matrix with identity
-        void transpose();                                   // replace the matrix with its transpose
-        void invert();                                      // replace the matrix with its inverse
-
-        void translate(in float x, in float y, in float z); // multiply the matrix by passed translation values on the right
-        void translate(in J3DVector3 v);                    // multiply the matrix by passed translation values on the right
-        void scale(in float x, in float y, in float z);     // multiply the matrix by passed scale values on the right
-        void scale(in J3DVector3 v);                        // multiply the matrix by passed scale values on the right
-        void rotate(in float angle,                         // multiply the matrix by passed rotation values on the right
-                    in float x, in float y, in float z);    // (angle is in degrees)
-        void rotate(in float angle, in J3DVector3 v);       // multiply the matrix by passed rotation values on the right
-                                                            // (angle is in degrees)
-        void multiply(in CanvasMatrix matrix);              // multiply the matrix by the passed matrix on the right
-        void divide(in float divisor);                      // divide the matrix by the passed divisor
-        void ortho(in float left, in float right,           // multiply the matrix by the passed ortho values on the right
-                   in float bottom, in float top,
-                   in float near, in float far);
-        void frustum(in float left, in float right,         // multiply the matrix by the passed frustum values on the right
-                     in float bottom, in float top,
-                     in float near, in float far);
-        void perspective(in float fovy, in float aspect,    // multiply the matrix by the passed perspective values on the right
-                         in float zNear, in float zFar);
-        void lookat(in J3DVector3 eye,                      // multiply the matrix by the passed lookat
-                in J3DVector3 center,  in J3DVector3 up);   // values on the right
-         bool decompose(in J3DVector3 translate,            // decompose the matrix into the passed vector
-                        in J3DVector3 rotate,
-                        in J3DVector3 scale,
-                        in J3DVector3 skew,
-                        in sequence<float> perspective);
-    }
-
-    [
-        Constructor(in J3DVector3 vector),                  // copy passed vector into new J3DVector3
-        Constructor(in sequence<float> array)               // create new J3DVector3 with 3 floats from array
-        Constructor(in float x, in float y, in float z)     // create new J3DVector3 with 3 floats
-        Constructor()                                       // create new J3DVector3 with (0,0,0)
-    ]
-    interface J3DVector3 {
-        void load(in J3DVector3 vector);                    // copy the values from the passed vector
-        void load(in sequence<float> array);                // copy 3 floats into the vector from array
-        void load(in float x, in float y, in float z);      // copy 3 floats into the vector
-        sequence<float> getAsArray();                       // return the vector as an array of 3 floats
-        Float32Array getAsFloat32Array();             // return the matrix as a Float32Array with 16 values
-        void multMatrix(in J3DIMatrix4 matrix);             // multiply the vector by the passed matrix (on the right)
-        float vectorLength();                               // return the length of the vector
-        float dot();                                        // return the dot product of the vector
-        void cross(in J3DVector3 v);                        // replace the vector with vector x v
-        void divide(in float divisor);                      // divide the vector by the passed divisor
-    }
-*/
-
-J3DIHasCSSMatrix = false;
-J3DIHasCSSMatrixCopy = false;
 /*
-if ("WebKitCSSMatrix" in window && ("media" in window && window.media.matchMedium("(-webkit-transform-3d)")) ||
-                                   ("styleMedia" in window && window.styleMedia.matchMedium("(-webkit-transform-3d)"))) {
-    J3DIHasCSSMatrix = true;
-    if ("copy" in WebKitCSSMatrix.prototype)
-        J3DIHasCSSMatrixCopy = true;
-}
-*/
+ * vec3.set
+ * Copies the values of one vec3 to another
+ *
+ * Params:
+ * vec - vec3 containing values to copy
+ * dest - vec3 receiving copied values
+ *
+ * Returns:
+ * dest
+ */
+vec3.set = function(vec, dest) {
+	dest[0] = vec[0];
+	dest[1] = vec[1];
+	dest[2] = vec[2];
+	
+	return dest;
+};
 
-//  console.log("J3DIHasCSSMatrix="+J3DIHasCSSMatrix);
-//  console.log("J3DIHasCSSMatrixCopy="+J3DIHasCSSMatrixCopy);
+/*
+ * vec3.add
+ * Performs a vector addition
+ *
+ * Params:
+ * vec - vec3, first operand
+ * vec2 - vec3, second operand
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.add = function(vec, vec2, dest) {
+	if(!dest || vec == dest) {
+		vec[0] += vec2[0];
+		vec[1] += vec2[1];
+		vec[2] += vec2[2];
+		return vec;
+	}
+	
+	dest[0] = vec[0] + vec2[0];
+	dest[1] = vec[1] + vec2[1];
+	dest[2] = vec[2] + vec2[2];
+	return dest;
+};
 
-//
-// J3DIMatrix4
-//
-J3DIMatrix4 = function(m)
-{
-    if (J3DIHasCSSMatrix)
-        this.$matrix = new WebKitCSSMatrix;
-    else
-        this.$matrix = new Object;
+/*
+ * vec3.subtract
+ * Performs a vector subtraction
+ *
+ * Params:
+ * vec - vec3, first operand
+ * vec2 - vec3, second operand
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.subtract = function(vec, vec2, dest) {
+	if(!dest || vec == dest) {
+		vec[0] -= vec2[0];
+		vec[1] -= vec2[1];
+		vec[2] -= vec2[2];
+		return vec;
+	}
+	
+	dest[0] = vec[0] - vec2[0];
+	dest[1] = vec[1] - vec2[1];
+	dest[2] = vec[2] - vec2[2];
+	return dest;
+};
 
-    if (typeof m == 'object') {
-        if ("length" in m && m.length >= 16) {
-            this.load(m);
-            return;
-        }
-        else if (m instanceof J3DIMatrix4) {
-            this.load(m);
-            return;
-        }
-    }
-    this.makeIdentity();
-}
+/*
+ * vec3.negate
+ * Negates the components of a vec3
+ *
+ * Params:
+ * vec - vec3 to negate
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.negate = function(vec, dest) {
+	if(!dest) { dest = vec; }
+	
+	dest[0] = -vec[0];
+	dest[1] = -vec[1];
+	dest[2] = -vec[2];
+	return dest;
+};
 
-J3DIMatrix4.prototype.load = function()
-{
-    if (arguments.length == 1 && typeof arguments[0] == 'object') {
-        var matrix;
+/*
+ * vec3.scale
+ * Multiplies the components of a vec3 by a scalar value
+ *
+ * Params:
+ * vec - vec3 to scale
+ * val - Numeric value to scale by
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.scale = function(vec, val, dest) {
+	if(!dest || vec == dest) {
+		vec[0] *= val;
+		vec[1] *= val;
+		vec[2] *= val;
+		return vec;
+	}
+	
+	dest[0] = vec[0]*val;
+	dest[1] = vec[1]*val;
+	dest[2] = vec[2]*val;
+	return dest;
+};
 
-        if (arguments[0] instanceof J3DIMatrix4) {
-            matrix = arguments[0].$matrix;
+/*
+ * vec3.normalize
+ * Generates a unit vector of the same direction as the provided vec3
+ * If vector length is 0, returns [0, 0, 0]
+ *
+ * Params:
+ * vec - vec3 to normalize
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.normalize = function(vec, dest) {
+	if(!dest) { dest = vec; }
+	
+	var x = vec[0], y = vec[1], z = vec[2];
+	var len = Math.sqrt(x*x + y*y + z*z);
+	
+	if (!len) {
+		dest[0] = 0;
+		dest[1] = 0;
+		dest[2] = 0;
+		return dest;
+	} else if (len == 1) {
+		dest[0] = x;
+		dest[1] = y;
+		dest[2] = z;
+		return dest;
+	}
+	
+	len = 1 / len;
+	dest[0] = x*len;
+	dest[1] = y*len;
+	dest[2] = z*len;
+	return dest;
+};
 
-            this.$matrix.m11 = matrix.m11;
-            this.$matrix.m12 = matrix.m12;
-            this.$matrix.m13 = matrix.m13;
-            this.$matrix.m14 = matrix.m14;
+/*
+ * vec3.cross
+ * Generates the cross product of two vec3s
+ *
+ * Params:
+ * vec - vec3, first operand
+ * vec2 - vec3, second operand
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.cross = function(vec, vec2, dest){
+	if(!dest) { dest = vec; }
+	
+	var x = vec[0], y = vec[1], z = vec[2];
+	var x2 = vec2[0], y2 = vec2[1], z2 = vec2[2];
+	
+	dest[0] = y*z2 - z*y2;
+	dest[1] = z*x2 - x*z2;
+	dest[2] = x*y2 - y*x2;
+	return dest;
+};
 
-            this.$matrix.m21 = matrix.m21;
-            this.$matrix.m22 = matrix.m22;
-            this.$matrix.m23 = matrix.m23;
-            this.$matrix.m24 = matrix.m24;
+/*
+ * vec3.length
+ * Caclulates the length of a vec3
+ *
+ * Params:
+ * vec - vec3 to calculate length of
+ *
+ * Returns:
+ * Length of vec
+ */
+vec3.length = function(vec){
+	var x = vec[0], y = vec[1], z = vec[2];
+	return Math.sqrt(x*x + y*y + z*z);
+};
 
-            this.$matrix.m31 = matrix.m31;
-            this.$matrix.m32 = matrix.m32;
-            this.$matrix.m33 = matrix.m33;
-            this.$matrix.m34 = matrix.m34;
+/*
+ * vec3.dot
+ * Caclulates the dot product of two vec3s
+ *
+ * Params:
+ * vec - vec3, first operand
+ * vec2 - vec3, second operand
+ *
+ * Returns:
+ * Dot product of vec and vec2
+ */
+vec3.dot = function(vec, vec2){
+	return vec[0]*vec2[0] + vec[1]*vec2[1] + vec[2]*vec2[2];
+};
 
-            this.$matrix.m41 = matrix.m41;
-            this.$matrix.m42 = matrix.m42;
-            this.$matrix.m43 = matrix.m43;
-            this.$matrix.m44 = matrix.m44;
-            return;
-        }
-        else
-            matrix = arguments[0];
+/*
+ * vec3.direction
+ * Generates a unit vector pointing from one vector to another
+ *
+ * Params:
+ * vec - origin vec3
+ * vec2 - vec3 to point to
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+vec3.direction = function(vec, vec2, dest) {
+	if(!dest) { dest = vec; }
+	
+	var x = vec[0] - vec2[0];
+	var y = vec[1] - vec2[1];
+	var z = vec[2] - vec2[2];
+	
+	var len = Math.sqrt(x*x + y*y + z*z);
+	if (!len) { 
+		dest[0] = 0; 
+		dest[1] = 0; 
+		dest[2] = 0;
+		return dest; 
+	}
+	
+	len = 1 / len;
+	dest[0] = x * len; 
+	dest[1] = y * len; 
+	dest[2] = z * len;
+	return dest; 
+};
 
-        if ("length" in matrix && matrix.length >= 16) {
-            this.$matrix.m11 = matrix[0];
-            this.$matrix.m12 = matrix[1];
-            this.$matrix.m13 = matrix[2];
-            this.$matrix.m14 = matrix[3];
+/*
+ * vec3.str
+ * Returns a string representation of a vector
+ *
+ * Params:
+ * vec - vec3 to represent as a string
+ *
+ * Returns:
+ * string representation of vec
+ */
+vec3.str = function(vec) {
+	return '[' + vec[0] + ', ' + vec[1] + ', ' + vec[2] + ']'; 
+};
 
-            this.$matrix.m21 = matrix[4];
-            this.$matrix.m22 = matrix[5];
-            this.$matrix.m23 = matrix[6];
-            this.$matrix.m24 = matrix[7];
+/*
+ * mat3 - 3x3 Matrix
+ */
+var mat3 = {};
 
-            this.$matrix.m31 = matrix[8];
-            this.$matrix.m32 = matrix[9];
-            this.$matrix.m33 = matrix[10];
-            this.$matrix.m34 = matrix[11];
+/*
+ * mat3.create
+ * Creates a new instance of a mat3 using the default array type
+ * Any javascript array containing at least 9 numeric elements can serve as a mat3
+ *
+ * Params:
+ * mat - Optional, mat3 containing values to initialize with
+ *
+ * Returns:
+ * New mat3
+ */
+mat3.create = function(mat) {
+	var dest = new glMatrixArrayType(9);
+	
+	if(mat) {
+		dest[0] = mat[0];
+		dest[1] = mat[1];
+		dest[2] = mat[2];
+		dest[3] = mat[3];
+		dest[4] = mat[4];
+		dest[5] = mat[5];
+		dest[6] = mat[6];
+		dest[7] = mat[7];
+		dest[8] = mat[8];
+		dest[9] = mat[9];
+	}
+	
+	return dest;
+};
 
-            this.$matrix.m41 = matrix[12];
-            this.$matrix.m42 = matrix[13];
-            this.$matrix.m43 = matrix[14];
-            this.$matrix.m44 = matrix[15];
-            return;
-        }
-    }
+/*
+ * mat3.set
+ * Copies the values of one mat3 to another
+ *
+ * Params:
+ * mat - mat3 containing values to copy
+ * dest - mat3 receiving copied values
+ *
+ * Returns:
+ * dest
+ */
+mat3.set = function(mat, dest) {
+	dest[0] = mat[0];
+	dest[1] = mat[1];
+	dest[2] = mat[2];
+	dest[3] = mat[3];
+	dest[4] = mat[4];
+	dest[5] = mat[5];
+	dest[6] = mat[6];
+	dest[7] = mat[7];
+	dest[8] = mat[8];
+	return dest;
+};
 
-    this.makeIdentity();
-}
+/*
+ * mat3.identity
+ * Sets a mat3 to an identity matrix
+ *
+ * Params:
+ * dest - mat3 to set
+ *
+ * Returns:
+ * dest
+ */
+mat3.identity = function(dest) {
+	dest[0] = 1;
+	dest[1] = 0;
+	dest[2] = 0;
+	dest[3] = 0;
+	dest[4] = 1;
+	dest[5] = 0;
+	dest[6] = 0;
+	dest[7] = 0;
+	dest[8] = 1;
+	return dest;
+};
 
-J3DIMatrix4.prototype.getAsArray = function()
-{
-    return [
-        this.$matrix.m11, this.$matrix.m12, this.$matrix.m13, this.$matrix.m14,
-        this.$matrix.m21, this.$matrix.m22, this.$matrix.m23, this.$matrix.m24,
-        this.$matrix.m31, this.$matrix.m32, this.$matrix.m33, this.$matrix.m34,
-        this.$matrix.m41, this.$matrix.m42, this.$matrix.m43, this.$matrix.m44
-    ];
-}
+/*
+ * mat3.toMat4
+ * Copies the elements of a mat3 into the upper 3x3 elements of a mat4
+ *
+ * Params:
+ * mat - mat3 containing values to copy
+ * dest - Optional, mat4 receiving copied values
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+mat3.toMat4 = function(mat, dest) {
+	if(!dest) { dest = mat4.create(); }
+	
+	dest[0] = mat[0];
+	dest[1] = mat[1];
+	dest[2] = mat[2];
+	dest[3] = 0;
 
-J3DIMatrix4.prototype.getAsFloat32Array = function()
-{
-    if (J3DIHasCSSMatrixCopy) {
-        var array = new Float32Array(16);
-        this.$matrix.copy(array);
-        return array;
-    }
-    return new Float32Array(this.getAsArray());
-}
+	dest[4] = mat[3];
+	dest[5] = mat[4];
+	dest[6] = mat[5];
+	dest[7] = 0;
 
-J3DIMatrix4.prototype.setUniform = function(ctx, loc, transpose)
-{
-    if (J3DIMatrix4.setUniformArray == undefined) {
-        J3DIMatrix4.setUniformWebGLArray = new Float32Array(16);
-        J3DIMatrix4.setUniformArray = new Array(16);
-    }
+	dest[8] = mat[6];
+	dest[9] = mat[7];
+	dest[10] = mat[8];
+	dest[11] = 0;
 
-    if (J3DIHasCSSMatrixCopy)
-        this.$matrix.copy(J3DIMatrix4.setUniformWebGLArray);
-    else {
-        J3DIMatrix4.setUniformArray[0] = this.$matrix.m11;
-        J3DIMatrix4.setUniformArray[1] = this.$matrix.m12;
-        J3DIMatrix4.setUniformArray[2] = this.$matrix.m13;
-        J3DIMatrix4.setUniformArray[3] = this.$matrix.m14;
-        J3DIMatrix4.setUniformArray[4] = this.$matrix.m21;
-        J3DIMatrix4.setUniformArray[5] = this.$matrix.m22;
-        J3DIMatrix4.setUniformArray[6] = this.$matrix.m23;
-        J3DIMatrix4.setUniformArray[7] = this.$matrix.m24;
-        J3DIMatrix4.setUniformArray[8] = this.$matrix.m31;
-        J3DIMatrix4.setUniformArray[9] = this.$matrix.m32;
-        J3DIMatrix4.setUniformArray[10] = this.$matrix.m33;
-        J3DIMatrix4.setUniformArray[11] = this.$matrix.m34;
-        J3DIMatrix4.setUniformArray[12] = this.$matrix.m41;
-        J3DIMatrix4.setUniformArray[13] = this.$matrix.m42;
-        J3DIMatrix4.setUniformArray[14] = this.$matrix.m43;
-        J3DIMatrix4.setUniformArray[15] = this.$matrix.m44;
-
-        J3DIMatrix4.setUniformWebGLArray.set(J3DIMatrix4.setUniformArray);
-    }
-
-    ctx.uniformMatrix4fv(loc, transpose, J3DIMatrix4.setUniformWebGLArray);
-}
-
-J3DIMatrix4.prototype.makeIdentity = function()
-{
-    this.$matrix.m11 = 1;
-    this.$matrix.m12 = 0;
-    this.$matrix.m13 = 0;
-    this.$matrix.m14 = 0;
-
-    this.$matrix.m21 = 0;
-    this.$matrix.m22 = 1;
-    this.$matrix.m23 = 0;
-    this.$matrix.m24 = 0;
-
-    this.$matrix.m31 = 0;
-    this.$matrix.m32 = 0;
-    this.$matrix.m33 = 1;
-    this.$matrix.m34 = 0;
-
-    this.$matrix.m41 = 0;
-    this.$matrix.m42 = 0;
-    this.$matrix.m43 = 0;
-    this.$matrix.m44 = 1;
-}
-
-J3DIMatrix4.prototype.transpose = function()
-{
-    var tmp = this.$matrix.m12;
-    this.$matrix.m12 = this.$matrix.m21;
-    this.$matrix.m21 = tmp;
-
-    tmp = this.$matrix.m13;
-    this.$matrix.m13 = this.$matrix.m31;
-    this.$matrix.m31 = tmp;
-
-    tmp = this.$matrix.m14;
-    this.$matrix.m14 = this.$matrix.m41;
-    this.$matrix.m41 = tmp;
-
-    tmp = this.$matrix.m23;
-    this.$matrix.m23 = this.$matrix.m32;
-    this.$matrix.m32 = tmp;
-
-    tmp = this.$matrix.m24;
-    this.$matrix.m24 = this.$matrix.m42;
-    this.$matrix.m42 = tmp;
-
-    tmp = this.$matrix.m34;
-    this.$matrix.m34 = this.$matrix.m43;
-    this.$matrix.m43 = tmp;
-}
-
-J3DIMatrix4.prototype.invert = function()
-{
-    if (J3DIHasCSSMatrix) {
-        this.$matrix = this.$matrix.inverse();
-        return;
-    }
-
-    // Calculate the 4x4 determinant
-    // If the determinant is zero,
-    // then the inverse matrix is not unique.
-    var det = this._determinant4x4();
-
-    if (Math.abs(det) < 1e-8)
-        return null;
-
-    this._makeAdjoint();
-
-    // Scale the adjoint matrix to get the inverse
-    this.$matrix.m11 /= det;
-    this.$matrix.m12 /= det;
-    this.$matrix.m13 /= det;
-    this.$matrix.m14 /= det;
-
-    this.$matrix.m21 /= det;
-    this.$matrix.m22 /= det;
-    this.$matrix.m23 /= det;
-    this.$matrix.m24 /= det;
-
-    this.$matrix.m31 /= det;
-    this.$matrix.m32 /= det;
-    this.$matrix.m33 /= det;
-    this.$matrix.m34 /= det;
-
-    this.$matrix.m41 /= det;
-    this.$matrix.m42 /= det;
-    this.$matrix.m43 /= det;
-    this.$matrix.m44 /= det;
-}
-
-J3DIMatrix4.prototype.translate = function(x,y,z)
-{
-    if (typeof x == 'object' && "length" in x) {
-        var t = x;
-        x = t[0];
-        y = t[1];
-        z = t[2];
-    }
-    else {
-        if (x == undefined)
-            x = 0;
-        if (y == undefined)
-            y = 0;
-        if (z == undefined)
-            z = 0;
-    }
-
-    if (J3DIHasCSSMatrix) {
-        this.$matrix = this.$matrix.translate(x, y, z);
-        return;
-    }
-
-    var matrix = new J3DIMatrix4();
-    matrix.$matrix.m41 = x;
-    matrix.$matrix.m42 = y;
-    matrix.$matrix.m43 = z;
-
-    this.multiply(matrix);
-}
-
-J3DIMatrix4.prototype.scale = function(x,y,z)
-{
-    if (typeof x == 'object' && "length" in x) {
-        var t = x;
-        x = t[0];
-        y = t[1];
-        z = t[2];
-    }
-    else {
-        if (x == undefined)
-            x = 1;
-        if (z == undefined) {
-            if (y == undefined) {
-                y = x;
-                z = x;
-            }
-            else
-                z = 1;
-        }
-        else if (y == undefined)
-            y = x;
-    }
-
-    if (J3DIHasCSSMatrix) {
-        this.$matrix = this.$matrix.scale(x, y, z);
-        return;
-    }
-
-    var matrix = new J3DIMatrix4();
-    matrix.$matrix.m11 = x;
-    matrix.$matrix.m22 = y;
-    matrix.$matrix.m33 = z;
-
-    this.multiply(matrix);
-}
-
-J3DIMatrix4.prototype.rotate = function(angle,x,y,z)
-{
-    // Forms are (angle, x,y,z), (angle,vector), (angleX, angleY, angleZ), (angle)
-    if (typeof x == 'object' && "length" in x) {
-        var t = x;
-        x = t[0];
-        y = t[1];
-        z = t[2];
-    }
-    else {
-        if (arguments.length == 1) {
-            x = 0;
-            y = 0;
-            z = 1;
-        }
-        else if (arguments.length == 3) {
-            this.rotate(angle, 1,0,0); // about X axis
-            this.rotate(x, 0,1,0); // about Y axis
-            this.rotate(y, 0,0,1); // about Z axis
-            return;
-        }
-    }
-
-    if (J3DIHasCSSMatrix) {
-        this.$matrix = this.$matrix.rotateAxisAngle(x, y, z, angle);
-        return;
-    }
-
-    // angles are in degrees. Switch to radians
-    angle = angle / 180 * Math.PI;
-
-    angle /= 2;
-    var sinA = Math.sin(angle);
-    var cosA = Math.cos(angle);
-    var sinA2 = sinA * sinA;
-
-    // normalize
-    var len = Math.sqrt(x * x + y * y + z * z);
-    if (len == 0) {
-        // bad vector, just use something reasonable
-        x = 0;
-        y = 0;
-        z = 1;
-    } else if (len != 1) {
-        x /= len;
-        y /= len;
-        z /= len;
-    }
-
-    var mat = new J3DIMatrix4();
-
-    // optimize case where axis is along major axis
-    if (x == 1 && y == 0 && z == 0) {
-        mat.$matrix.m11 = 1;
-        mat.$matrix.m12 = 0;
-        mat.$matrix.m13 = 0;
-        mat.$matrix.m21 = 0;
-        mat.$matrix.m22 = 1 - 2 * sinA2;
-        mat.$matrix.m23 = 2 * sinA * cosA;
-        mat.$matrix.m31 = 0;
-        mat.$matrix.m32 = -2 * sinA * cosA;
-        mat.$matrix.m33 = 1 - 2 * sinA2;
-        mat.$matrix.m14 = mat.$matrix.m24 = mat.$matrix.m34 = 0;
-        mat.$matrix.m41 = mat.$matrix.m42 = mat.$matrix.m43 = 0;
-        mat.$matrix.m44 = 1;
-    } else if (x == 0 && y == 1 && z == 0) {
-        mat.$matrix.m11 = 1 - 2 * sinA2;
-        mat.$matrix.m12 = 0;
-        mat.$matrix.m13 = -2 * sinA * cosA;
-        mat.$matrix.m21 = 0;
-        mat.$matrix.m22 = 1;
-        mat.$matrix.m23 = 0;
-        mat.$matrix.m31 = 2 * sinA * cosA;
-        mat.$matrix.m32 = 0;
-        mat.$matrix.m33 = 1 - 2 * sinA2;
-        mat.$matrix.m14 = mat.$matrix.m24 = mat.$matrix.m34 = 0;
-        mat.$matrix.m41 = mat.$matrix.m42 = mat.$matrix.m43 = 0;
-        mat.$matrix.m44 = 1;
-    } else if (x == 0 && y == 0 && z == 1) {
-        mat.$matrix.m11 = 1 - 2 * sinA2;
-        mat.$matrix.m12 = 2 * sinA * cosA;
-        mat.$matrix.m13 = 0;
-        mat.$matrix.m21 = -2 * sinA * cosA;
-        mat.$matrix.m22 = 1 - 2 * sinA2;
-        mat.$matrix.m23 = 0;
-        mat.$matrix.m31 = 0;
-        mat.$matrix.m32 = 0;
-        mat.$matrix.m33 = 1;
-        mat.$matrix.m14 = mat.$matrix.m24 = mat.$matrix.m34 = 0;
-        mat.$matrix.m41 = mat.$matrix.m42 = mat.$matrix.m43 = 0;
-        mat.$matrix.m44 = 1;
-    } else {
-        var x2 = x*x;
-        var y2 = y*y;
-        var z2 = z*z;
-
-        mat.$matrix.m11 = 1 - 2 * (y2 + z2) * sinA2;
-        mat.$matrix.m12 = 2 * (x * y * sinA2 + z * sinA * cosA);
-        mat.$matrix.m13 = 2 * (x * z * sinA2 - y * sinA * cosA);
-        mat.$matrix.m21 = 2 * (y * x * sinA2 - z * sinA * cosA);
-        mat.$matrix.m22 = 1 - 2 * (z2 + x2) * sinA2;
-        mat.$matrix.m23 = 2 * (y * z * sinA2 + x * sinA * cosA);
-        mat.$matrix.m31 = 2 * (z * x * sinA2 + y * sinA * cosA);
-        mat.$matrix.m32 = 2 * (z * y * sinA2 - x * sinA * cosA);
-        mat.$matrix.m33 = 1 - 2 * (x2 + y2) * sinA2;
-        mat.$matrix.m14 = mat.$matrix.m24 = mat.$matrix.m34 = 0;
-        mat.$matrix.m41 = mat.$matrix.m42 = mat.$matrix.m43 = 0;
-        mat.$matrix.m44 = 1;
-    }
-    this.multiply(mat);
+	dest[12] = 0;
+	dest[13] = 0;
+	dest[14] = 0;
+	dest[15] = 1;
+	
+	return dest;
 }
 
-J3DIMatrix4.prototype.multiply = function(mat)
-{
-    if (J3DIHasCSSMatrix) {
-        this.$matrix = this.$matrix.multiply(mat.$matrix);
-        return;
-    }
+/*
+ * mat3.str
+ * Returns a string representation of a mat3
+ *
+ * Params:
+ * mat - mat3 to represent as a string
+ *
+ * Returns:
+ * string representation of mat
+ */
+mat3.str = function(mat) {
+	return '[' + mat[0] + ', ' + mat[1] + ', ' + mat[2] + 
+		', ' + mat[3] + ', '+ mat[4] + ', ' + mat[5] + 
+		', ' + mat[6] + ', ' + mat[7] + ', '+ mat[8] + ']';
+};
 
-    var m11 = (mat.$matrix.m11 * this.$matrix.m11 + mat.$matrix.m12 * this.$matrix.m21
-               + mat.$matrix.m13 * this.$matrix.m31 + mat.$matrix.m14 * this.$matrix.m41);
-    var m12 = (mat.$matrix.m11 * this.$matrix.m12 + mat.$matrix.m12 * this.$matrix.m22
-               + mat.$matrix.m13 * this.$matrix.m32 + mat.$matrix.m14 * this.$matrix.m42);
-    var m13 = (mat.$matrix.m11 * this.$matrix.m13 + mat.$matrix.m12 * this.$matrix.m23
-               + mat.$matrix.m13 * this.$matrix.m33 + mat.$matrix.m14 * this.$matrix.m43);
-    var m14 = (mat.$matrix.m11 * this.$matrix.m14 + mat.$matrix.m12 * this.$matrix.m24
-               + mat.$matrix.m13 * this.$matrix.m34 + mat.$matrix.m14 * this.$matrix.m44);
+/*
+ * mat4 - 4x4 Matrix
+ */
+var mat4 = {};
 
-    var m21 = (mat.$matrix.m21 * this.$matrix.m11 + mat.$matrix.m22 * this.$matrix.m21
-               + mat.$matrix.m23 * this.$matrix.m31 + mat.$matrix.m24 * this.$matrix.m41);
-    var m22 = (mat.$matrix.m21 * this.$matrix.m12 + mat.$matrix.m22 * this.$matrix.m22
-               + mat.$matrix.m23 * this.$matrix.m32 + mat.$matrix.m24 * this.$matrix.m42);
-    var m23 = (mat.$matrix.m21 * this.$matrix.m13 + mat.$matrix.m22 * this.$matrix.m23
-               + mat.$matrix.m23 * this.$matrix.m33 + mat.$matrix.m24 * this.$matrix.m43);
-    var m24 = (mat.$matrix.m21 * this.$matrix.m14 + mat.$matrix.m22 * this.$matrix.m24
-               + mat.$matrix.m23 * this.$matrix.m34 + mat.$matrix.m24 * this.$matrix.m44);
+/*
+ * mat4.create
+ * Creates a new instance of a mat4 using the default array type
+ * Any javascript array containing at least 16 numeric elements can serve as a mat4
+ *
+ * Params:
+ * mat - Optional, mat4 containing values to initialize with
+ *
+ * Returns:
+ * New mat4
+ */
+mat4.create = function(mat) {
+	var dest = new glMatrixArrayType(16);
+	
+	if(mat) {
+		dest[0] = mat[0];
+		dest[1] = mat[1];
+		dest[2] = mat[2];
+		dest[3] = mat[3];
+		dest[4] = mat[4];
+		dest[5] = mat[5];
+		dest[6] = mat[6];
+		dest[7] = mat[7];
+		dest[8] = mat[8];
+		dest[9] = mat[9];
+		dest[10] = mat[10];
+		dest[11] = mat[11];
+		dest[12] = mat[12];
+		dest[13] = mat[13];
+		dest[14] = mat[14];
+		dest[15] = mat[15];
+	}
+	
+	return dest;
+};
 
-    var m31 = (mat.$matrix.m31 * this.$matrix.m11 + mat.$matrix.m32 * this.$matrix.m21
-               + mat.$matrix.m33 * this.$matrix.m31 + mat.$matrix.m34 * this.$matrix.m41);
-    var m32 = (mat.$matrix.m31 * this.$matrix.m12 + mat.$matrix.m32 * this.$matrix.m22
-               + mat.$matrix.m33 * this.$matrix.m32 + mat.$matrix.m34 * this.$matrix.m42);
-    var m33 = (mat.$matrix.m31 * this.$matrix.m13 + mat.$matrix.m32 * this.$matrix.m23
-               + mat.$matrix.m33 * this.$matrix.m33 + mat.$matrix.m34 * this.$matrix.m43);
-    var m34 = (mat.$matrix.m31 * this.$matrix.m14 + mat.$matrix.m32 * this.$matrix.m24
-               + mat.$matrix.m33 * this.$matrix.m34 + mat.$matrix.m34 * this.$matrix.m44);
+/*
+ * mat4.set
+ * Copies the values of one mat4 to another
+ *
+ * Params:
+ * mat - mat4 containing values to copy
+ * dest - mat4 receiving copied values
+ *
+ * Returns:
+ * dest
+ */
+mat4.set = function(mat, dest) {
+	dest[0] = mat[0];
+	dest[1] = mat[1];
+	dest[2] = mat[2];
+	dest[3] = mat[3];
+	dest[4] = mat[4];
+	dest[5] = mat[5];
+	dest[6] = mat[6];
+	dest[7] = mat[7];
+	dest[8] = mat[8];
+	dest[9] = mat[9];
+	dest[10] = mat[10];
+	dest[11] = mat[11];
+	dest[12] = mat[12];
+	dest[13] = mat[13];
+	dest[14] = mat[14];
+	dest[15] = mat[15];
+	return dest;
+};
 
-    var m41 = (mat.$matrix.m41 * this.$matrix.m11 + mat.$matrix.m42 * this.$matrix.m21
-               + mat.$matrix.m43 * this.$matrix.m31 + mat.$matrix.m44 * this.$matrix.m41);
-    var m42 = (mat.$matrix.m41 * this.$matrix.m12 + mat.$matrix.m42 * this.$matrix.m22
-               + mat.$matrix.m43 * this.$matrix.m32 + mat.$matrix.m44 * this.$matrix.m42);
-    var m43 = (mat.$matrix.m41 * this.$matrix.m13 + mat.$matrix.m42 * this.$matrix.m23
-               + mat.$matrix.m43 * this.$matrix.m33 + mat.$matrix.m44 * this.$matrix.m43);
-    var m44 = (mat.$matrix.m41 * this.$matrix.m14 + mat.$matrix.m42 * this.$matrix.m24
-               + mat.$matrix.m43 * this.$matrix.m34 + mat.$matrix.m44 * this.$matrix.m44);
+/*
+ * mat4.identity
+ * Sets a mat4 to an identity matrix
+ *
+ * Params:
+ * dest - mat4 to set
+ *
+ * Returns:
+ * dest
+ */
+mat4.identity = function(dest) {
+	dest[0] = 1;
+	dest[1] = 0;
+	dest[2] = 0;
+	dest[3] = 0;
+	dest[4] = 0;
+	dest[5] = 1;
+	dest[6] = 0;
+	dest[7] = 0;
+	dest[8] = 0;
+	dest[9] = 0;
+	dest[10] = 1;
+	dest[11] = 0;
+	dest[12] = 0;
+	dest[13] = 0;
+	dest[14] = 0;
+	dest[15] = 1;
+	return dest;
+};
 
-    this.$matrix.m11 = m11;
-    this.$matrix.m12 = m12;
-    this.$matrix.m13 = m13;
-    this.$matrix.m14 = m14;
+/*
+ * mat4.transpose
+ * Transposes a mat4 (flips the values over the diagonal)
+ *
+ * Params:
+ * mat - mat4 to transpose
+ * dest - Optional, mat4 receiving transposed values. If not specified result is written to mat
+ *
+ * Returns:
+ * dest is specified, mat otherwise
+ */
+mat4.transpose = function(mat, dest) {
+	// If we are transposing ourselves we can skip a few steps but have to cache some values
+	if(!dest || mat == dest) { 
+		var a01 = mat[1], a02 = mat[2], a03 = mat[3];
+		var a12 = mat[6], a13 = mat[7];
+		var a23 = mat[11];
+		
+		mat[1] = mat[4];
+		mat[2] = mat[8];
+		mat[3] = mat[12];
+		mat[4] = a01;
+		mat[6] = mat[9];
+		mat[7] = mat[13];
+		mat[8] = a02;
+		mat[9] = a12;
+		mat[11] = mat[14];
+		mat[12] = a03;
+		mat[13] = a13;
+		mat[14] = a23;
+		return mat;
+	}
+	
+	dest[0] = mat[0];
+	dest[1] = mat[4];
+	dest[2] = mat[8];
+	dest[3] = mat[12];
+	dest[4] = mat[1];
+	dest[5] = mat[5];
+	dest[6] = mat[9];
+	dest[7] = mat[13];
+	dest[8] = mat[2];
+	dest[9] = mat[6];
+	dest[10] = mat[10];
+	dest[11] = mat[14];
+	dest[12] = mat[3];
+	dest[13] = mat[7];
+	dest[14] = mat[11];
+	dest[15] = mat[15];
+	return dest;
+};
 
-    this.$matrix.m21 = m21;
-    this.$matrix.m22 = m22;
-    this.$matrix.m23 = m23;
-    this.$matrix.m24 = m24;
+/*
+ * mat4.determinant
+ * Calculates the determinant of a mat4
+ *
+ * Params:
+ * mat - mat4 to calculate determinant of
+ *
+ * Returns:
+ * determinant of mat
+ */
+mat4.determinant = function(mat) {
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	var a30 = mat[12], a31 = mat[13], a32 = mat[14], a33 = mat[15];
 
-    this.$matrix.m31 = m31;
-    this.$matrix.m32 = m32;
-    this.$matrix.m33 = m33;
-    this.$matrix.m34 = m34;
+	return	a30*a21*a12*a03 - a20*a31*a12*a03 - a30*a11*a22*a03 + a10*a31*a22*a03 +
+			a20*a11*a32*a03 - a10*a21*a32*a03 - a30*a21*a02*a13 + a20*a31*a02*a13 +
+			a30*a01*a22*a13 - a00*a31*a22*a13 - a20*a01*a32*a13 + a00*a21*a32*a13 +
+			a30*a11*a02*a23 - a10*a31*a02*a23 - a30*a01*a12*a23 + a00*a31*a12*a23 +
+			a10*a01*a32*a23 - a00*a11*a32*a23 - a20*a11*a02*a33 + a10*a21*a02*a33 +
+			a20*a01*a12*a33 - a00*a21*a12*a33 - a10*a01*a22*a33 + a00*a11*a22*a33;
+};
 
-    this.$matrix.m41 = m41;
-    this.$matrix.m42 = m42;
-    this.$matrix.m43 = m43;
-    this.$matrix.m44 = m44;
+/*
+ * mat4.inverse
+ * Calculates the inverse matrix of a mat4
+ *
+ * Params:
+ * mat - mat4 to calculate inverse of
+ * dest - Optional, mat4 receiving inverse matrix. If not specified result is written to mat
+ *
+ * Returns:
+ * dest is specified, mat otherwise
+ */
+mat4.inverse = function(mat, dest) {
+	if(!dest) { dest = mat; }
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	var a30 = mat[12], a31 = mat[13], a32 = mat[14], a33 = mat[15];
+	
+	var b00 = a00*a11 - a01*a10;
+	var b01 = a00*a12 - a02*a10;
+	var b02 = a00*a13 - a03*a10;
+	var b03 = a01*a12 - a02*a11;
+	var b04 = a01*a13 - a03*a11;
+	var b05 = a02*a13 - a03*a12;
+	var b06 = a20*a31 - a21*a30;
+	var b07 = a20*a32 - a22*a30;
+	var b08 = a20*a33 - a23*a30;
+	var b09 = a21*a32 - a22*a31;
+	var b10 = a21*a33 - a23*a31;
+	var b11 = a22*a33 - a23*a32;
+	
+	// Calculate the determinant (inlined to avoid double-caching)
+	var invDet = 1/(b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06);
+	
+	dest[0] = (a11*b11 - a12*b10 + a13*b09)*invDet;
+	dest[1] = (-a01*b11 + a02*b10 - a03*b09)*invDet;
+	dest[2] = (a31*b05 - a32*b04 + a33*b03)*invDet;
+	dest[3] = (-a21*b05 + a22*b04 - a23*b03)*invDet;
+	dest[4] = (-a10*b11 + a12*b08 - a13*b07)*invDet;
+	dest[5] = (a00*b11 - a02*b08 + a03*b07)*invDet;
+	dest[6] = (-a30*b05 + a32*b02 - a33*b01)*invDet;
+	dest[7] = (a20*b05 - a22*b02 + a23*b01)*invDet;
+	dest[8] = (a10*b10 - a11*b08 + a13*b06)*invDet;
+	dest[9] = (-a00*b10 + a01*b08 - a03*b06)*invDet;
+	dest[10] = (a30*b04 - a31*b02 + a33*b00)*invDet;
+	dest[11] = (-a20*b04 + a21*b02 - a23*b00)*invDet;
+	dest[12] = (-a10*b09 + a11*b07 - a12*b06)*invDet;
+	dest[13] = (a00*b09 - a01*b07 + a02*b06)*invDet;
+	dest[14] = (-a30*b03 + a31*b01 - a32*b00)*invDet;
+	dest[15] = (a20*b03 - a21*b01 + a22*b00)*invDet;
+	
+	return dest;
+};
+
+/*
+ * mat4.toRotationMat
+ * Copies the upper 3x3 elements of a mat4 into another mat4
+ *
+ * Params:
+ * mat - mat4 containing values to copy
+ * dest - Optional, mat4 receiving copied values
+ *
+ * Returns:
+ * dest is specified, a new mat4 otherwise
+ */
+mat4.toRotationMat = function(mat, dest) {
+	if(!dest) { dest = mat4.create(); }
+	
+	dest[0] = mat[0];
+	dest[1] = mat[1];
+	dest[2] = mat[2];
+	dest[3] = mat[3];
+	dest[4] = mat[4];
+	dest[5] = mat[5];
+	dest[6] = mat[6];
+	dest[7] = mat[7];
+	dest[8] = mat[8];
+	dest[9] = mat[9];
+	dest[10] = mat[10];
+	dest[11] = mat[11];
+	dest[12] = 0;
+	dest[13] = 0;
+	dest[14] = 0;
+	dest[15] = 1;
+	
+	return dest;
+};
+
+/*
+ * mat4.toMat3
+ * Copies the upper 3x3 elements of a mat4 into a mat3
+ *
+ * Params:
+ * mat - mat4 containing values to copy
+ * dest - Optional, mat3 receiving copied values
+ *
+ * Returns:
+ * dest is specified, a new mat3 otherwise
+ */
+mat4.toMat3 = function(mat, dest) {
+	if(!dest) { dest = mat3.create(); }
+	
+	dest[0] = mat[0];
+	dest[1] = mat[1];
+	dest[2] = mat[2];
+	dest[3] = mat[4];
+	dest[4] = mat[5];
+	dest[5] = mat[6];
+	dest[6] = mat[8];
+	dest[7] = mat[9];
+	dest[8] = mat[10];
+	
+	return dest;
+};
+
+/*
+ * mat4.toInverseMat3
+ * Calculates the inverse of the upper 3x3 elements of a mat4 and copies the result into a mat3
+ * The resulting matrix is useful for calculating transformed normals
+ *
+ * Params:
+ * mat - mat4 containing values to invert and copy
+ * dest - Optional, mat3 receiving values
+ *
+ * Returns:
+ * dest is specified, a new mat3 otherwise
+ */
+mat4.toInverseMat3 = function(mat, dest) {
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10];
+	
+	var b01 = a22*a11-a12*a21;
+	var b11 = -a22*a10+a12*a20;
+	var b21 = a21*a10-a11*a20;
+		
+	var d = a00*b01 + a01*b11 + a02*b21;
+	if (!d) { return null; }
+	var id = 1/d;
+	
+	if(!dest) { dest = mat3.create(); }
+	
+	dest[0] = b01*id;
+	dest[1] = (-a22*a01 + a02*a21)*id;
+	dest[2] = (a12*a01 - a02*a11)*id;
+	dest[3] = b11*id;
+	dest[4] = (a22*a00 - a02*a20)*id;
+	dest[5] = (-a12*a00 + a02*a10)*id;
+	dest[6] = b21*id;
+	dest[7] = (-a21*a00 + a01*a20)*id;
+	dest[8] = (a11*a00 - a01*a10)*id;
+	
+	return dest;
+};
+
+/*
+ * mat4.multiply
+ * Performs a matrix multiplication
+ *
+ * Params:
+ * mat - mat4, first operand
+ * mat2 - mat4, second operand
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.multiply = function(mat, mat2, dest) {
+	if(!dest) { dest = mat }
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	var a30 = mat[12], a31 = mat[13], a32 = mat[14], a33 = mat[15];
+	
+	var b00 = mat2[0], b01 = mat2[1], b02 = mat2[2], b03 = mat2[3];
+	var b10 = mat2[4], b11 = mat2[5], b12 = mat2[6], b13 = mat2[7];
+	var b20 = mat2[8], b21 = mat2[9], b22 = mat2[10], b23 = mat2[11];
+	var b30 = mat2[12], b31 = mat2[13], b32 = mat2[14], b33 = mat2[15];
+	
+	dest[0] = b00*a00 + b01*a10 + b02*a20 + b03*a30;
+	dest[1] = b00*a01 + b01*a11 + b02*a21 + b03*a31;
+	dest[2] = b00*a02 + b01*a12 + b02*a22 + b03*a32;
+	dest[3] = b00*a03 + b01*a13 + b02*a23 + b03*a33;
+	dest[4] = b10*a00 + b11*a10 + b12*a20 + b13*a30;
+	dest[5] = b10*a01 + b11*a11 + b12*a21 + b13*a31;
+	dest[6] = b10*a02 + b11*a12 + b12*a22 + b13*a32;
+	dest[7] = b10*a03 + b11*a13 + b12*a23 + b13*a33;
+	dest[8] = b20*a00 + b21*a10 + b22*a20 + b23*a30;
+	dest[9] = b20*a01 + b21*a11 + b22*a21 + b23*a31;
+	dest[10] = b20*a02 + b21*a12 + b22*a22 + b23*a32;
+	dest[11] = b20*a03 + b21*a13 + b22*a23 + b23*a33;
+	dest[12] = b30*a00 + b31*a10 + b32*a20 + b33*a30;
+	dest[13] = b30*a01 + b31*a11 + b32*a21 + b33*a31;
+	dest[14] = b30*a02 + b31*a12 + b32*a22 + b33*a32;
+	dest[15] = b30*a03 + b31*a13 + b32*a23 + b33*a33;
+	
+	return dest;
+};
+
+/*
+ * mat4.multiplyVec3
+ * Transforms a vec3 with the given matrix
+ * 4th vector component is implicitly '1'
+ *
+ * Params:
+ * mat - mat4 to transform the vector with
+ * vec - vec3 to transform
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+mat4.multiplyVec3 = function(mat, vec, dest) {
+	if(!dest) { dest = vec }
+	
+	var x = vec[0], y = vec[1], z = vec[2];
+	
+	dest[0] = mat[0]*x + mat[4]*y + mat[8]*z + mat[12];
+	dest[1] = mat[1]*x + mat[5]*y + mat[9]*z + mat[13];
+	dest[2] = mat[2]*x + mat[6]*y + mat[10]*z + mat[14];
+	
+	return dest;
+};
+
+/*
+ * mat4.multiplyVec4
+ * Transforms a vec4 with the given matrix
+ *
+ * Params:
+ * mat - mat4 to transform the vector with
+ * vec - vec4 to transform
+ * dest - Optional, vec4 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+mat4.multiplyVec4 = function(mat, vec, dest) {
+	if(!dest) { dest = vec }
+	
+	var x = vec[0], y = vec[1], z = vec[2], w = vec[3];
+	
+	dest[0] = mat[0]*x + mat[4]*y + mat[8]*z + mat[12]*w;
+	dest[1] = mat[1]*x + mat[5]*y + mat[9]*z + mat[13]*w;
+	dest[2] = mat[2]*x + mat[6]*y + mat[10]*z + mat[14]*w;
+	dest[4] = mat[4]*x + mat[7]*y + mat[11]*z + mat[15]*w;
+	
+	return dest;
+};
+
+/*
+ * mat4.translate
+ * Translates a matrix by the given vector
+ *
+ * Params:
+ * mat - mat4 to translate
+ * vec - vec3 specifying the translation
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.translate = function(mat, vec, dest) {
+	var x = vec[0], y = vec[1], z = vec[2];
+	
+	if(!dest || mat == dest) {
+		mat[12] = mat[0]*x + mat[4]*y + mat[8]*z + mat[12];
+		mat[13] = mat[1]*x + mat[5]*y + mat[9]*z + mat[13];
+		mat[14] = mat[2]*x + mat[6]*y + mat[10]*z + mat[14];
+		mat[15] = mat[3]*x + mat[7]*y + mat[11]*z + mat[15];
+		return mat;
+	}
+	
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	
+	dest[0] = a00;
+	dest[1] = a01;
+	dest[2] = a02;
+	dest[3] = a03;
+	dest[4] = a10;
+	dest[5] = a11;
+	dest[6] = a12;
+	dest[7] = a13;
+	dest[8] = a20;
+	dest[9] = a21;
+	dest[10] = a22;
+	dest[11] = a23;
+	
+	dest[12] = a00*x + a10*y + a20*z + mat[12];
+	dest[13] = a01*x + a11*y + a21*z + mat[13];
+	dest[14] = a02*x + a12*y + a22*z + mat[14];
+	dest[15] = a03*x + a13*y + a23*z + mat[15];
+	return dest;
+};
+
+/*
+ * mat4.scale
+ * Scales a matrix by the given vector
+ *
+ * Params:
+ * mat - mat4 to scale
+ * vec - vec3 specifying the scale for each axis
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.scale = function(mat, vec, dest) {
+	var x = vec[0], y = vec[1], z = vec[2];
+	
+	if(!dest || mat == dest) {
+		mat[0] *= x;
+		mat[1] *= x;
+		mat[2] *= x;
+		mat[3] *= x;
+		mat[4] *= y;
+		mat[5] *= y;
+		mat[6] *= y;
+		mat[7] *= y;
+		mat[8] *= z;
+		mat[9] *= z;
+		mat[10] *= z;
+		mat[11] *= z;
+		return mat;
+	}
+	
+	dest[0] = mat[0]*x;
+	dest[1] = mat[1]*x;
+	dest[2] = mat[2]*x;
+	dest[3] = mat[3]*x;
+	dest[4] = mat[4]*y;
+	dest[5] = mat[5]*y;
+	dest[6] = mat[6]*y;
+	dest[7] = mat[7]*y;
+	dest[8] = mat[8]*z;
+	dest[9] = mat[9]*z;
+	dest[10] = mat[10]*z;
+	dest[11] = mat[11]*z;
+	dest[12] = mat[12];
+	dest[13] = mat[13];
+	dest[14] = mat[14];
+	dest[15] = mat[15];
+	return dest;
+};
+
+/*
+ * mat4.rotate
+ * Rotates a matrix by the given angle around the specified axis
+ * If rotating around a primary axis (X,Y,Z) one of the specialized rotation functions should be used instead for performance
+ *
+ * Params:
+ * mat - mat4 to rotate
+ * angle - angle (in radians) to rotate
+ * axis - vec3 representing the axis to rotate around 
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.rotate = function(mat, angle, axis, dest) {
+	var x = axis[0], y = axis[1], z = axis[2];
+	var len = Math.sqrt(x*x + y*y + z*z);
+	if (!len) { return null; }
+	if (len != 1) {
+		len = 1 / len;
+		x *= len; 
+		y *= len; 
+		z *= len;
+	}
+	
+	var s = Math.sin(angle);
+	var c = Math.cos(angle);
+	var t = 1-c;
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	
+	// Construct the elements of the rotation matrix
+	var b00 = x*x*t + c, b01 = y*x*t + z*s, b02 = z*x*t - y*s;
+	var b10 = x*y*t - z*s, b11 = y*y*t + c, b12 = z*y*t + x*s;
+	var b20 = x*z*t + y*s, b21 = y*z*t - x*s, b22 = z*z*t + c;
+	
+	if(!dest) { 
+		dest = mat 
+	} else if(mat != dest) { // If the source and destination differ, copy the unchanged last row
+		dest[12] = mat[12];
+		dest[13] = mat[13];
+		dest[14] = mat[14];
+		dest[15] = mat[15];
+	}
+	
+	// Perform rotation-specific matrix multiplication
+	dest[0] = a00*b00 + a10*b01 + a20*b02;
+	dest[1] = a01*b00 + a11*b01 + a21*b02;
+	dest[2] = a02*b00 + a12*b01 + a22*b02;
+	dest[3] = a03*b00 + a13*b01 + a23*b02;
+	
+	dest[4] = a00*b10 + a10*b11 + a20*b12;
+	dest[5] = a01*b10 + a11*b11 + a21*b12;
+	dest[6] = a02*b10 + a12*b11 + a22*b12;
+	dest[7] = a03*b10 + a13*b11 + a23*b12;
+	
+	dest[8] = a00*b20 + a10*b21 + a20*b22;
+	dest[9] = a01*b20 + a11*b21 + a21*b22;
+	dest[10] = a02*b20 + a12*b21 + a22*b22;
+	dest[11] = a03*b20 + a13*b21 + a23*b22;
+	return dest;
+};
+
+/*
+ * mat4.rotateX
+ * Rotates a matrix by the given angle around the X axis
+ *
+ * Params:
+ * mat - mat4 to rotate
+ * angle - angle (in radians) to rotate
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.rotateX = function(mat, angle, dest) {
+	var s = Math.sin(angle);
+	var c = Math.cos(angle);
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+
+	if(!dest) { 
+		dest = mat 
+	} else if(mat != dest) { // If the source and destination differ, copy the unchanged rows
+		dest[0] = mat[0];
+		dest[1] = mat[1];
+		dest[2] = mat[2];
+		dest[3] = mat[3];
+		
+		dest[12] = mat[12];
+		dest[13] = mat[13];
+		dest[14] = mat[14];
+		dest[15] = mat[15];
+	}
+	
+	// Perform axis-specific matrix multiplication
+	dest[4] = a10*c + a20*s;
+	dest[5] = a11*c + a21*s;
+	dest[6] = a12*c + a22*s;
+	dest[7] = a13*c + a23*s;
+	
+	dest[8] = a10*-s + a20*c;
+	dest[9] = a11*-s + a21*c;
+	dest[10] = a12*-s + a22*c;
+	dest[11] = a13*-s + a23*c;
+	return dest;
+};
+
+/*
+ * mat4.rotateY
+ * Rotates a matrix by the given angle around the Y axis
+ *
+ * Params:
+ * mat - mat4 to rotate
+ * angle - angle (in radians) to rotate
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.rotateY = function(mat, angle, dest) {
+	var s = Math.sin(angle);
+	var c = Math.cos(angle);
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+	
+	if(!dest) { 
+		dest = mat 
+	} else if(mat != dest) { // If the source and destination differ, copy the unchanged rows
+		dest[4] = mat[4];
+		dest[5] = mat[5];
+		dest[6] = mat[6];
+		dest[7] = mat[7];
+		
+		dest[12] = mat[12];
+		dest[13] = mat[13];
+		dest[14] = mat[14];
+		dest[15] = mat[15];
+	}
+	
+	// Perform axis-specific matrix multiplication
+	dest[0] = a00*c + a20*-s;
+	dest[1] = a01*c + a21*-s;
+	dest[2] = a02*c + a22*-s;
+	dest[3] = a03*c + a23*-s;
+	
+	dest[8] = a00*s + a20*c;
+	dest[9] = a01*s + a21*c;
+	dest[10] = a02*s + a22*c;
+	dest[11] = a03*s + a23*c;
+	return dest;
+};
+
+/*
+ * mat4.rotateZ
+ * Rotates a matrix by the given angle around the Z axis
+ *
+ * Params:
+ * mat - mat4 to rotate
+ * angle - angle (in radians) to rotate
+ * dest - Optional, mat4 receiving operation result. If not specified result is written to mat
+ *
+ * Returns:
+ * dest if specified, mat otherwise
+ */
+mat4.rotateZ = function(mat, angle, dest) {
+	var s = Math.sin(angle);
+	var c = Math.cos(angle);
+	
+	// Cache the matrix values (makes for huge speed increases!)
+	var a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+	var a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+	
+	if(!dest) { 
+		dest = mat 
+	} else if(mat != dest) { // If the source and destination differ, copy the unchanged last row
+		dest[8] = mat[8];
+		dest[9] = mat[9];
+		dest[10] = mat[10];
+		dest[11] = mat[11];
+		
+		dest[12] = mat[12];
+		dest[13] = mat[13];
+		dest[14] = mat[14];
+		dest[15] = mat[15];
+	}
+	
+	// Perform axis-specific matrix multiplication
+	dest[0] = a00*c + a10*s;
+	dest[1] = a01*c + a11*s;
+	dest[2] = a02*c + a12*s;
+	dest[3] = a03*c + a13*s;
+	
+	dest[4] = a00*-s + a10*c;
+	dest[5] = a01*-s + a11*c;
+	dest[6] = a02*-s + a12*c;
+	dest[7] = a03*-s + a13*c;
+	
+	return dest;
+};
+
+/*
+ * mat4.frustum
+ * Generates a frustum matrix with the given bounds
+ *
+ * Params:
+ * left, right - scalar, left and right bounds of the frustum
+ * bottom, top - scalar, bottom and top bounds of the frustum
+ * near, far - scalar, near and far bounds of the frustum
+ * dest - Optional, mat4 frustum matrix will be written into
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+mat4.frustum = function(left, right, bottom, top, near, far, dest) {
+	if(!dest) { dest = mat4.create(); }
+	var rl = (right - left);
+	var tb = (top - bottom);
+	var fn = (far - near);
+	dest[0] = (near*2) / rl;
+	dest[1] = 0;
+	dest[2] = 0;
+	dest[3] = 0;
+	dest[4] = 0;
+	dest[5] = (near*2) / tb;
+	dest[6] = 0;
+	dest[7] = 0;
+	dest[8] = (right + left) / rl;
+	dest[9] = (top + bottom) / tb;
+	dest[10] = -(far + near) / fn;
+	dest[11] = -1;
+	dest[12] = 0;
+	dest[13] = 0;
+	dest[14] = -(far*near*2) / fn;
+	dest[15] = 0;
+	return dest;
+};
+
+/*
+ * mat4.perspective
+ * Generates a perspective projection matrix with the given bounds
+ *
+ * Params:
+ * fovy - scalar, vertical field of view
+ * aspect - scalar, aspect ratio. typically viewport width/height
+ * near, far - scalar, near and far bounds of the frustum
+ * dest - Optional, mat4 frustum matrix will be written into
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+mat4.perspective = function(fovy, aspect, near, far, dest) {
+	var top = near*Math.tan(fovy*Math.PI / 360.0);
+	var right = top*aspect;
+	return mat4.frustum(-right, right, -top, top, near, far, dest);
+};
+
+/*
+ * mat4.ortho
+ * Generates a orthogonal projection matrix with the given bounds
+ *
+ * Params:
+ * left, right - scalar, left and right bounds of the frustum
+ * bottom, top - scalar, bottom and top bounds of the frustum
+ * near, far - scalar, near and far bounds of the frustum
+ * dest - Optional, mat4 frustum matrix will be written into
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+mat4.ortho = function(left, right, bottom, top, near, far, dest) {
+	if(!dest) { dest = mat4.create(); }
+	var rl = (right - left);
+	var tb = (top - bottom);
+	var fn = (far - near);
+	dest[0] = 2 / rl;
+	dest[1] = 0;
+	dest[2] = 0;
+	dest[3] = 0;
+	dest[4] = 0;
+	dest[5] = 2 / tb;
+	dest[6] = 0;
+	dest[7] = 0;
+	dest[8] = 0;
+	dest[9] = 0;
+	dest[10] = -2 / fn;
+	dest[11] = 0;
+	dest[12] = -(left + right) / rl;
+	dest[13] = -(top + bottom) / tb;
+	dest[14] = -(far + near) / fn;
+	dest[15] = 1;
+	return dest;
+};
+
+/*
+ * mat4.ortho
+ * Generates a look-at matrix with the given eye position, focal point, and up axis
+ *
+ * Params:
+ * eye - vec3, position of the viewer
+ * center - vec3, point the viewer is looking at
+ * up - vec3 pointing "up"
+ * dest - Optional, mat4 frustum matrix will be written into
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+mat4.lookAt = function(eye, center, up, dest) {
+	if(!dest) { dest = mat4.create(); }
+	
+	var eyex = eye[0],
+		eyey = eye[1],
+		eyez = eye[2],
+		upx = up[0],
+		upy = up[1],
+		upz = up[2],
+		centerx = center[0],
+		centery = center[1],
+		centerz = center[2];
+
+	if (eyex == centerx && eyey == centery && eyez == centerz) {
+		return mat4.identity(dest);
+	}
+	
+	var z0,z1,z2,x0,x1,x2,y0,y1,y2,len;
+	
+	//vec3.direction(eye, center, z);
+	z0 = eyex - center[0];
+	z1 = eyey - center[1];
+	z2 = eyez - center[2];
+	
+	// normalize (no check needed for 0 because of early return)
+	len = 1/Math.sqrt(z0*z0 + z1*z1 + z2*z2);
+	z0 *= len;
+	z1 *= len;
+	z2 *= len;
+	
+	//vec3.normalize(vec3.cross(up, z, x));
+	x0 = upy*z2 - upz*z1;
+	x1 = upz*z0 - upx*z2;
+	x2 = upx*z1 - upy*z0;
+	len = Math.sqrt(x0*x0 + x1*x1 + x2*x2);
+	if (!len) {
+		x0 = 0;
+		x1 = 0;
+		x2 = 0;
+	} else {
+		len = 1/len;
+		x0 *= len;
+		x1 *= len;
+		x2 *= len;
+	};
+	
+	//vec3.normalize(vec3.cross(z, x, y));
+	y0 = z1*x2 - z2*x1;
+	y1 = z2*x0 - z0*x2;
+	y2 = z0*x1 - z1*x0;
+	
+	len = Math.sqrt(y0*y0 + y1*y1 + y2*y2);
+	if (!len) {
+		y0 = 0;
+		y1 = 0;
+		y2 = 0;
+	} else {
+		len = 1/len;
+		y0 *= len;
+		y1 *= len;
+		y2 *= len;
+	}
+	
+	dest[0] = x0;
+	dest[1] = y0;
+	dest[2] = z0;
+	dest[3] = 0;
+	dest[4] = x1;
+	dest[5] = y1;
+	dest[6] = z1;
+	dest[7] = 0;
+	dest[8] = x2;
+	dest[9] = y2;
+	dest[10] = z2;
+	dest[11] = 0;
+	dest[12] = -(x0*eyex + x1*eyey + x2*eyez);
+	dest[13] = -(y0*eyex + y1*eyey + y2*eyez);
+	dest[14] = -(z0*eyex + z1*eyey + z2*eyez);
+	dest[15] = 1;
+	
+	return dest;
+};
+
+/*
+ * mat4.str
+ * Returns a string representation of a mat4
+ *
+ * Params:
+ * mat - mat4 to represent as a string
+ *
+ * Returns:
+ * string representation of mat
+ */
+mat4.str = function(mat) {
+	return '[' + mat[0] + ', ' + mat[1] + ', ' + mat[2] + ', ' + mat[3] + 
+		', '+ mat[4] + ', ' + mat[5] + ', ' + mat[6] + ', ' + mat[7] + 
+		', '+ mat[8] + ', ' + mat[9] + ', ' + mat[10] + ', ' + mat[11] + 
+		', '+ mat[12] + ', ' + mat[13] + ', ' + mat[14] + ', ' + mat[15] + ']';
+};
+
+/*
+ * quat4 - Quaternions 
+ */
+quat4 = {};
+
+/*
+ * quat4.create
+ * Creates a new instance of a quat4 using the default array type
+ * Any javascript array containing at least 4 numeric elements can serve as a quat4
+ *
+ * Params:
+ * quat - Optional, quat4 containing values to initialize with
+ *
+ * Returns:
+ * New quat4
+ */
+quat4.create = function(quat) {
+	var dest = new glMatrixArrayType(4);
+	
+	if(quat) {
+		dest[0] = quat[0];
+		dest[1] = quat[1];
+		dest[2] = quat[2];
+		dest[3] = quat[3];
+	}
+	
+	return dest;
+};
+
+/*
+ * quat4.set
+ * Copies the values of one quat4 to another
+ *
+ * Params:
+ * quat - quat4 containing values to copy
+ * dest - quat4 receiving copied values
+ *
+ * Returns:
+ * dest
+ */
+quat4.set = function(quat, dest) {
+	dest[0] = quat[0];
+	dest[1] = quat[1];
+	dest[2] = quat[2];
+	dest[3] = quat[3];
+	
+	return dest;
+};
+
+/*
+ * quat4.calculateW
+ * Calculates the W component of a quat4 from the X, Y, and Z components.
+ * Assumes that quaternion is 1 unit in length. 
+ * Any existing W component will be ignored. 
+ *
+ * Params:
+ * quat - quat4 to calculate W component of
+ * dest - Optional, quat4 receiving calculated values. If not specified result is written to quat
+ *
+ * Returns:
+ * dest if specified, quat otherwise
+ */
+quat4.calculateW = function(quat, dest) {
+	var x = quat[0], y = quat[1], z = quat[2];
+
+	if(!dest || quat == dest) {
+		quat[3] = -Math.sqrt(Math.abs(1.0 - x*x - y*y - z*z));
+		return quat;
+	}
+	dest[0] = x;
+	dest[1] = y;
+	dest[2] = z;
+	dest[3] = -Math.sqrt(Math.abs(1.0 - x*x - y*y - z*z));
+	return dest;
 }
 
-J3DIMatrix4.prototype.divide = function(divisor)
-{
-    this.$matrix.m11 /= divisor;
-    this.$matrix.m12 /= divisor;
-    this.$matrix.m13 /= divisor;
-    this.$matrix.m14 /= divisor;
-
-    this.$matrix.m21 /= divisor;
-    this.$matrix.m22 /= divisor;
-    this.$matrix.m23 /= divisor;
-    this.$matrix.m24 /= divisor;
-
-    this.$matrix.m31 /= divisor;
-    this.$matrix.m32 /= divisor;
-    this.$matrix.m33 /= divisor;
-    this.$matrix.m34 /= divisor;
-
-    this.$matrix.m41 /= divisor;
-    this.$matrix.m42 /= divisor;
-    this.$matrix.m43 /= divisor;
-    this.$matrix.m44 /= divisor;
-
+/*
+ * quat4.inverse
+ * Calculates the inverse of a quat4
+ *
+ * Params:
+ * quat - quat4 to calculate inverse of
+ * dest - Optional, quat4 receiving inverse values. If not specified result is written to quat
+ *
+ * Returns:
+ * dest if specified, quat otherwise
+ */
+quat4.inverse = function(quat, dest) {
+	if(!dest || quat == dest) {
+		quat[0] *= 1;
+		quat[1] *= 1;
+		quat[2] *= 1;
+		return quat;
+	}
+	dest[0] = -quat[0];
+	dest[1] = -quat[1];
+	dest[2] = -quat[2];
+	dest[3] = quat[3];
+	return dest;
 }
 
-J3DIMatrix4.prototype.ortho = function(left, right, bottom, top, near, far)
-{
-    var tx = (left + right) / (left - right);
-    var ty = (top + bottom) / (top - bottom);
-    var tz = (far + near) / (far - near);
-
-    var matrix = new J3DIMatrix4();
-    matrix.$matrix.m11 = 2 / (left - right);
-    matrix.$matrix.m12 = 0;
-    matrix.$matrix.m13 = 0;
-    matrix.$matrix.m14 = 0;
-    matrix.$matrix.m21 = 0;
-    matrix.$matrix.m22 = 2 / (top - bottom);
-    matrix.$matrix.m23 = 0;
-    matrix.$matrix.m24 = 0;
-    matrix.$matrix.m31 = 0;
-    matrix.$matrix.m32 = 0;
-    matrix.$matrix.m33 = -2 / (far - near);
-    matrix.$matrix.m34 = 0;
-    matrix.$matrix.m41 = tx;
-    matrix.$matrix.m42 = ty;
-    matrix.$matrix.m43 = tz;
-    matrix.$matrix.m44 = 1;
-
-    this.multiply(matrix);
+/*
+ * quat4.length
+ * Calculates the length of a quat4
+ *
+ * Params:
+ * quat - quat4 to calculate length of
+ *
+ * Returns:
+ * Length of quat
+ */
+quat4.length = function(quat) {
+	var x = quat[0], y = quat[1], z = quat[2], w = quat[3];
+	return Math.sqrt(x*x + y*y + z*z + w*w);
 }
 
-J3DIMatrix4.prototype.frustum = function(left, right, bottom, top, near, far)
-{
-    var matrix = new J3DIMatrix4();
-    var A = (right + left) / (right - left);
-    var B = (top + bottom) / (top - bottom);
-    var C = -(far + near) / (far - near);
-    var D = -(2 * far * near) / (far - near);
-
-    matrix.$matrix.m11 = (2 * near) / (right - left);
-    matrix.$matrix.m12 = 0;
-    matrix.$matrix.m13 = 0;
-    matrix.$matrix.m14 = 0;
-
-    matrix.$matrix.m21 = 0;
-    matrix.$matrix.m22 = 2 * near / (top - bottom);
-    matrix.$matrix.m23 = 0;
-    matrix.$matrix.m24 = 0;
-
-    matrix.$matrix.m31 = A;
-    matrix.$matrix.m32 = B;
-    matrix.$matrix.m33 = C;
-    matrix.$matrix.m34 = -1;
-
-    matrix.$matrix.m41 = 0;
-    matrix.$matrix.m42 = 0;
-    matrix.$matrix.m43 = D;
-    matrix.$matrix.m44 = 0;
-
-    this.multiply(matrix);
+/*
+ * quat4.normalize
+ * Generates a unit quaternion of the same direction as the provided quat4
+ * If quaternion length is 0, returns [0, 0, 0, 0]
+ *
+ * Params:
+ * quat - quat4 to normalize
+ * dest - Optional, quat4 receiving operation result. If not specified result is written to quat
+ *
+ * Returns:
+ * dest if specified, quat otherwise
+ */
+quat4.normalize = function(quat, dest) {
+	if(!dest) { dest = quat; }
+	
+	var x = quat[0], y = quat[1], z = quat[2], w = quat[3];
+	var len = Math.sqrt(x*x + y*y + z*z + w*w);
+	if(len == 0) {
+		dest[0] = 0;
+		dest[1] = 0;
+		dest[2] = 0;
+		dest[3] = 0;
+		return dest;
+	}
+	len = 1/len;
+	dest[0] = x * len;
+	dest[1] = y * len;
+	dest[2] = z * len;
+	dest[3] = w * len;
+	
+	return dest;
 }
 
-J3DIMatrix4.prototype.perspective = function(fovy, aspect, zNear, zFar)
-{
-    var top = Math.tan(fovy * Math.PI / 360) * zNear;
-    var bottom = -top;
-    var left = aspect * bottom;
-    var right = aspect * top;
-    this.frustum(left, right, bottom, top, zNear, zFar);
+/*
+ * quat4.multiply
+ * Performs a quaternion multiplication
+ *
+ * Params:
+ * quat - quat4, first operand
+ * quat2 - quat4, second operand
+ * dest - Optional, quat4 receiving operation result. If not specified result is written to quat
+ *
+ * Returns:
+ * dest if specified, quat otherwise
+ */
+quat4.multiply = function(quat, quat2, dest) {
+	if(!dest) { dest = quat; }
+	
+	var qax = quat[0], qay = quat[1], qaz = quat[2], qaw = quat[3];
+	var qbx = quat2[0], qby = quat2[1], qbz = quat2[2], qbw = quat2[3];
+	
+	dest[0] = qax*qbw + qaw*qbx + qay*qbz - qaz*qby;
+	dest[1] = qay*qbw + qaw*qby + qaz*qbx - qax*qbz;
+	dest[2] = qaz*qbw + qaw*qbz + qax*qby - qay*qbx;
+	dest[3] = qaw*qbw - qax*qbx - qay*qby - qaz*qbz;
+	
+	return dest;
 }
 
-J3DIMatrix4.prototype.lookat = function(eyex, eyey, eyez, centerx, centery, centerz, upx, upy, upz)
-{
-    if (typeof eyez == 'object' && "length" in eyez) {
-        var t = eyez;
-        upx = t[0];
-        upy = t[1];
-        upz = t[2];
+/*
+ * quat4.multiplyVec3
+ * Transforms a vec3 with the given quaternion
+ *
+ * Params:
+ * quat - quat4 to transform the vector with
+ * vec - vec3 to transform
+ * dest - Optional, vec3 receiving operation result. If not specified result is written to vec
+ *
+ * Returns:
+ * dest if specified, vec otherwise
+ */
+quat4.multiplyVec3 = function(quat, vec, dest) {
+	if(!dest) { dest = vec; }
+	
+	var x = vec[0], y = vec[1], z = vec[2];
+	var qx = quat[0], qy = quat[1], qz = quat[2], qw = quat[3];
 
-        t = eyey;
-        centerx = t[0];
-        centery = t[1];
-        centerz = t[2];
-
-        t = eyex;
-        eyex = t[0];
-        eyey = t[1];
-        eyez = t[2];
-    }
-
-    var matrix = new J3DIMatrix4();
-
-    // Make rotation matrix
-
-    // Z vector
-    var zx = eyex - centerx;
-    var zy = eyey - centery;
-    var zz = eyez - centerz;
-    var mag = Math.sqrt(zx * zx + zy * zy + zz * zz);
-    if (mag) {
-        zx /= mag;
-        zy /= mag;
-        zz /= mag;
-    }
-
-    // Y vector
-    var yx = upx;
-    var yy = upy;
-    var yz = upz;
-
-    // X vector = Y cross Z
-    xx =  yy * zz - yz * zy;
-    xy = -yx * zz + yz * zx;
-    xz =  yx * zy - yy * zx;
-
-    // Recompute Y = Z cross X
-    yx = zy * xz - zz * xy;
-    yy = -zx * xz + zz * xx;
-    yx = zx * xy - zy * xx;
-
-    // cross product gives area of parallelogram, which is < 1.0 for
-    // non-perpendicular unit-length vectors; so normalize x, y here
-
-    mag = Math.sqrt(xx * xx + xy * xy + xz * xz);
-    if (mag) {
-        xx /= mag;
-        xy /= mag;
-        xz /= mag;
-    }
-
-    mag = Math.sqrt(yx * yx + yy * yy + yz * yz);
-    if (mag) {
-        yx /= mag;
-        yy /= mag;
-        yz /= mag;
-    }
-
-    matrix.$matrix.m11 = xx;
-    matrix.$matrix.m12 = xy;
-    matrix.$matrix.m13 = xz;
-    matrix.$matrix.m14 = 0;
-
-    matrix.$matrix.m21 = yx;
-    matrix.$matrix.m22 = yy;
-    matrix.$matrix.m23 = yz;
-    matrix.$matrix.m24 = 0;
-
-    matrix.$matrix.m31 = zx;
-    matrix.$matrix.m32 = zy;
-    matrix.$matrix.m33 = zz;
-    matrix.$matrix.m34 = 0;
-
-    matrix.$matrix.m41 = 0;
-    matrix.$matrix.m42 = 0;
-    matrix.$matrix.m43 = 0;
-    matrix.$matrix.m44 = 1;
-    matrix.translate(-eyex, -eyey, -eyez);
-
-    this.multiply(matrix);
+	// calculate quat * vec
+	var ix = qw*x + qy*z - qz*y;
+	var iy = qw*y + qz*x - qx*z;
+	var iz = qw*z + qx*y - qy*x;
+	var iw = -qx*x - qy*y - qz*z;
+	
+	// calculate result * inverse quat
+	dest[0] = ix*qw + iw*-qx + iy*-qz - iz*-qy;
+	dest[1] = iy*qw + iw*-qy + iz*-qx - ix*-qz;
+	dest[2] = iz*qw + iw*-qz + ix*-qy - iy*-qx;
+	
+	return dest;
 }
 
-// Returns true on success, false otherwise. All params are Array objects
-J3DIMatrix4.prototype.decompose = function(_translate, _rotate, _scale, _skew, _perspective)
-{
-    // Normalize the matrix.
-    if (this.$matrix.m44 == 0)
-        return false;
+/*
+ * quat4.toMat3
+ * Calculates a 3x3 matrix from the given quat4
+ *
+ * Params:
+ * quat - quat4 to create matrix from
+ * dest - Optional, mat3 receiving operation result
+ *
+ * Returns:
+ * dest if specified, a new mat3 otherwise
+ */
+quat4.toMat3 = function(quat, dest) {
+	if(!dest) { dest = mat3.create(); }
+	
+	var x = quat[0], y = quat[1], z = quat[2], w = quat[3];
 
-    // Gather the params
-    var translate, rotate, scale, skew, perspective;
+	var x2 = x + x;
+	var y2 = y + y;
+	var z2 = z + z;
 
-    var translate = (_translate == undefined || !("length" in _translate)) ? new J3DIVector3 : _translate;
-    var rotate = (_rotate == undefined || !("length" in _rotate)) ? new J3DIVector3 : _rotate;
-    var scale = (_scale == undefined || !("length" in _scale)) ? new J3DIVector3 : _scale;
-    var skew = (_skew == undefined || !("length" in _skew)) ? new J3DIVector3 : _skew;
-    var perspective = (_perspective == undefined || !("length" in _perspective)) ? new Array(4) : _perspective;
+	var xx = x*x2;
+	var xy = x*y2;
+	var xz = x*z2;
 
-    var matrix = new J3DIMatrix4(this);
+	var yy = y*y2;
+	var yz = y*z2;
+	var zz = z*z2;
 
-    matrix.divide(matrix.$matrix.m44);
+	var wx = w*x2;
+	var wy = w*y2;
+	var wz = w*z2;
 
-    // perspectiveMatrix is used to solve for perspective, but it also provides
-    // an easy way to test for singularity of the upper 3x3 component.
-    var perspectiveMatrix = new J3DIMatrix4(matrix);
+	dest[0] = 1 - (yy + zz);
+	dest[1] = xy - wz;
+	dest[2] = xz + wy;
 
-    perspectiveMatrix.$matrix.m14 = 0;
-    perspectiveMatrix.$matrix.m24 = 0;
-    perspectiveMatrix.$matrix.m34 = 0;
-    perspectiveMatrix.$matrix.m44 = 1;
+	dest[3] = xy + wz;
+	dest[4] = 1 - (xx + zz);
+	dest[5] = yz - wx;
 
-    if (perspectiveMatrix._determinant4x4() == 0)
-        return false;
-
-    // First, isolate perspective.
-    if (matrix.$matrix.m14 != 0 || matrix.$matrix.m24 != 0 || matrix.$matrix.m34 != 0) {
-        // rightHandSide is the right hand side of the equation.
-        var rightHandSide = [ matrix.$matrix.m14, matrix.$matrix.m24, matrix.$matrix.m34, matrix.$matrix.m44 ];
-
-        // Solve the equation by inverting perspectiveMatrix and multiplying
-        // rightHandSide by the inverse.
-        var inversePerspectiveMatrix = new J3DIMatrix4(perspectiveMatrix);
-        inversePerspectiveMatrix.invert();
-        var transposedInversePerspectiveMatrix = new J3DIMatrix4(inversePerspectiveMatrix);
-        transposedInversePerspectiveMatrix.transpose();
-        transposedInversePerspectiveMatrix.multVecMatrix(perspective, rightHandSide);
-
-        // Clear the perspective partition
-        matrix.$matrix.m14 = matrix.$matrix.m24 = matrix.$matrix.m34 = 0
-        matrix.$matrix.m44 = 1;
-    }
-    else {
-        // No perspective.
-        perspective[0] = perspective[1] = perspective[2] = 0;
-        perspective[3] = 1;
-    }
-
-    // Next take care of translation
-    translate[0] = matrix.$matrix.m41
-    matrix.$matrix.m41 = 0
-    translate[1] = matrix.$matrix.m42
-    matrix.$matrix.m42 = 0
-    translate[2] = matrix.$matrix.m43
-    matrix.$matrix.m43 = 0
-
-    // Now get scale and shear. 'row' is a 3 element array of 3 component vectors
-    var row0 = new J3DIVector3(matrix.$matrix.m11, matrix.$matrix.m12, matrix.$matrix.m13);
-    var row1 = new J3DIVector3(matrix.$matrix.m21, matrix.$matrix.m22, matrix.$matrix.m23);
-    var row2 = new J3DIVector3(matrix.$matrix.m31, matrix.$matrix.m32, matrix.$matrix.m33);
-
-    // Compute X scale factor and normalize first row.
-    scale[0] = row0.vectorLength();
-    row0.divide(scale[0]);
-
-    // Compute XY shear factor and make 2nd row orthogonal to 1st.
-    skew[0] = row0.dot(row1);
-    row1.combine(row0, 1.0, -skew[0]);
-
-    // Now, compute Y scale and normalize 2nd row.
-    scale[1] = row1.vectorLength();
-    row1.divide(scale[1]);
-    skew[0] /= scale[1];
-
-    // Compute XZ and YZ shears, orthogonalize 3rd row
-    skew[1] = row1.dot(row2);
-    row2.combine(row0, 1.0, -skew[1]);
-    skew[2] = row1.dot(row2);
-    row2.combine(row1, 1.0, -skew[2]);
-
-    // Next, get Z scale and normalize 3rd row.
-    scale[2] = row2.vectorLength();
-    row2.divide(scale[2]);
-    skew[1] /= scale[2];
-    skew[2] /= scale[2];
-
-    // At this point, the matrix (in rows) is orthonormal.
-    // Check for a coordinate system flip.  If the determinant
-    // is -1, then negate the matrix and the scaling factors.
-    var pdum3 = new J3DIVector3(row1);
-    pdum3.cross(row2);
-    if (row0.dot(pdum3) < 0) {
-        for (i = 0; i < 3; i++) {
-            scale[i] *= -1;
-            row[0][i] *= -1;
-            row[1][i] *= -1;
-            row[2][i] *= -1;
-        }
-    }
-
-    // Now, get the rotations out
-    rotate[1] = Math.asin(-row0[2]);
-    if (Math.cos(rotate[1]) != 0) {
-        rotate[0] = Math.atan2(row1[2], row2[2]);
-        rotate[2] = Math.atan2(row0[1], row0[0]);
-    }
-    else {
-        rotate[0] = Math.atan2(-row2[0], row1[1]);
-        rotate[2] = 0;
-    }
-
-    // Convert rotations to degrees
-    var rad2deg = 180 / Math.PI;
-    rotate[0] *= rad2deg;
-    rotate[1] *= rad2deg;
-    rotate[2] *= rad2deg;
-
-    return true;
+	dest[6] = xz - wy;
+	dest[7] = yz + wx;
+	dest[8] = 1 - (xx + yy);
+	
+	return dest;
 }
 
-J3DIMatrix4.prototype._determinant2x2 = function(a, b, c, d)
-{
-    return a * d - b * c;
+/*
+ * quat4.toMat4
+ * Calculates a 4x4 matrix from the given quat4
+ *
+ * Params:
+ * quat - quat4 to create matrix from
+ * dest - Optional, mat4 receiving operation result
+ *
+ * Returns:
+ * dest if specified, a new mat4 otherwise
+ */
+quat4.toMat4 = function(quat, dest) {
+	if(!dest) { dest = mat4.create(); }
+	
+	var x = quat[0], y = quat[1], z = quat[2], w = quat[3];
+
+	var x2 = x + x;
+	var y2 = y + y;
+	var z2 = z + z;
+
+	var xx = x*x2;
+	var xy = x*y2;
+	var xz = x*z2;
+
+	var yy = y*y2;
+	var yz = y*z2;
+	var zz = z*z2;
+
+	var wx = w*x2;
+	var wy = w*y2;
+	var wz = w*z2;
+
+	dest[0] = 1 - (yy + zz);
+	dest[1] = xy - wz;
+	dest[2] = xz + wy;
+	dest[3] = 0;
+
+	dest[4] = xy + wz;
+	dest[5] = 1 - (xx + zz);
+	dest[6] = yz - wx;
+	dest[7] = 0;
+
+	dest[8] = xz - wy;
+	dest[9] = yz + wx;
+	dest[10] = 1 - (xx + yy);
+	dest[11] = 0;
+
+	dest[12] = 0;
+	dest[13] = 0;
+	dest[14] = 0;
+	dest[15] = 1;
+	
+	return dest;
 }
 
-J3DIMatrix4.prototype._determinant3x3 = function(a1, a2, a3, b1, b2, b3, c1, c2, c3)
-{
-    return a1 * this._determinant2x2(b2, b3, c2, c3)
-         - b1 * this._determinant2x2(a2, a3, c2, c3)
-         + c1 * this._determinant2x2(a2, a3, b2, b3);
-}
-
-J3DIMatrix4.prototype._determinant4x4 = function()
-{
-    var a1 = this.$matrix.m11;
-    var b1 = this.$matrix.m12;
-    var c1 = this.$matrix.m13;
-    var d1 = this.$matrix.m14;
-
-    var a2 = this.$matrix.m21;
-    var b2 = this.$matrix.m22;
-    var c2 = this.$matrix.m23;
-    var d2 = this.$matrix.m24;
-
-    var a3 = this.$matrix.m31;
-    var b3 = this.$matrix.m32;
-    var c3 = this.$matrix.m33;
-    var d3 = this.$matrix.m34;
-
-    var a4 = this.$matrix.m41;
-    var b4 = this.$matrix.m42;
-    var c4 = this.$matrix.m43;
-    var d4 = this.$matrix.m44;
-
-    return a1 * this._determinant3x3(b2, b3, b4, c2, c3, c4, d2, d3, d4)
-         - b1 * this._determinant3x3(a2, a3, a4, c2, c3, c4, d2, d3, d4)
-         + c1 * this._determinant3x3(a2, a3, a4, b2, b3, b4, d2, d3, d4)
-         - d1 * this._determinant3x3(a2, a3, a4, b2, b3, b4, c2, c3, c4);
-}
-
-J3DIMatrix4.prototype._makeAdjoint = function()
-{
-    var a1 = this.$matrix.m11;
-    var b1 = this.$matrix.m12;
-    var c1 = this.$matrix.m13;
-    var d1 = this.$matrix.m14;
-
-    var a2 = this.$matrix.m21;
-    var b2 = this.$matrix.m22;
-    var c2 = this.$matrix.m23;
-    var d2 = this.$matrix.m24;
-
-    var a3 = this.$matrix.m31;
-    var b3 = this.$matrix.m32;
-    var c3 = this.$matrix.m33;
-    var d3 = this.$matrix.m34;
-
-    var a4 = this.$matrix.m41;
-    var b4 = this.$matrix.m42;
-    var c4 = this.$matrix.m43;
-    var d4 = this.$matrix.m44;
-
-    // Row column labeling reversed since we transpose rows & columns
-    this.$matrix.m11  =   this._determinant3x3(b2, b3, b4, c2, c3, c4, d2, d3, d4);
-    this.$matrix.m21  = - this._determinant3x3(a2, a3, a4, c2, c3, c4, d2, d3, d4);
-    this.$matrix.m31  =   this._determinant3x3(a2, a3, a4, b2, b3, b4, d2, d3, d4);
-    this.$matrix.m41  = - this._determinant3x3(a2, a3, a4, b2, b3, b4, c2, c3, c4);
-
-    this.$matrix.m12  = - this._determinant3x3(b1, b3, b4, c1, c3, c4, d1, d3, d4);
-    this.$matrix.m22  =   this._determinant3x3(a1, a3, a4, c1, c3, c4, d1, d3, d4);
-    this.$matrix.m32  = - this._determinant3x3(a1, a3, a4, b1, b3, b4, d1, d3, d4);
-    this.$matrix.m42  =   this._determinant3x3(a1, a3, a4, b1, b3, b4, c1, c3, c4);
-
-    this.$matrix.m13  =   this._determinant3x3(b1, b2, b4, c1, c2, c4, d1, d2, d4);
-    this.$matrix.m23  = - this._determinant3x3(a1, a2, a4, c1, c2, c4, d1, d2, d4);
-    this.$matrix.m33  =   this._determinant3x3(a1, a2, a4, b1, b2, b4, d1, d2, d4);
-    this.$matrix.m43  = - this._determinant3x3(a1, a2, a4, b1, b2, b4, c1, c2, c4);
-
-    this.$matrix.m14  = - this._determinant3x3(b1, b2, b3, c1, c2, c3, d1, d2, d3);
-    this.$matrix.m24  =   this._determinant3x3(a1, a2, a3, c1, c2, c3, d1, d2, d3);
-    this.$matrix.m34  = - this._determinant3x3(a1, a2, a3, b1, b2, b3, d1, d2, d3);
-    this.$matrix.m44  =   this._determinant3x3(a1, a2, a3, b1, b2, b3, c1, c2, c3);
-}
-
-//
-// J3DIVector3
-//
-J3DIVector3 = function(x,y,z)
-{
-    this.load(x,y,z);
-}
-
-J3DIVector3.prototype.load = function(x,y,z)
-{
-    if (typeof x == 'object' && "length" in x) {
-        this[0] = x[0];
-        this[1] = x[1];
-        this[2] = x[2];
-    }
-    else if (typeof x == 'number') {
-        this[0] = x;
-        this[1] = y;
-        this[2] = z;
-    }
-    else {
-        this[0] = 0;
-        this[1] = 0;
-        this[2] = 0;
-    }
-}
-
-J3DIVector3.prototype.getAsArray = function()
-{
-    return [ this[0], this[1], this[2] ];
-}
-
-J3DIVector3.prototype.getAsFloat32Array = function()
-{
-    return new Float32Array(this.getAsArray());
-}
-
-J3DIVector3.prototype.vectorLength = function()
-{
-    return Math.sqrt(this[0] * this[0] + this[1] * this[1] + this[2] * this[2]);
-}
-
-J3DIVector3.prototype.divide = function(divisor)
-{
-    this[0] /= divisor; this[1] /= divisor; this[2] /= divisor;
-}
-
-J3DIVector3.prototype.cross = function(v)
-{
-    this[0] =  this[1] * v[2] - this[2] * v[1];
-    this[1] = -this[0] * v[2] + this[2] * v[0];
-    this[2] =  this[0] * v[1] - this[1] * v[0];
-}
-
-J3DIVector3.prototype.dot = function(v)
-{
-    return this[0] * v[0] + this[1] * v[1] + this[2] * v[2];
-}
-
-J3DIVector3.prototype.combine = function(v, ascl, bscl)
-{
-    this[0] = (ascl * this[0]) + (bscl * v[0]);
-    this[1] = (ascl * this[1]) + (bscl * v[1]);
-    this[2] = (ascl * this[2]) + (bscl * v[2]);
-}
-
-J3DIVector3.prototype.multVecMatrix = function(matrix)
-{
-    var x = this[0];
-    var y = this[1];
-    var z = this[2];
-
-    this[0] = matrix.$matrix.m41 + x * matrix.$matrix.m11 + y * matrix.$matrix.m21 + z * matrix.$matrix.m31;
-    this[1] = matrix.$matrix.m42 + x * matrix.$matrix.m12 + y * matrix.$matrix.m22 + z * matrix.$matrix.m32;
-    this[2] = matrix.$matrix.m43 + x * matrix.$matrix.m13 + y * matrix.$matrix.m23 + z * matrix.$matrix.m33;
-    var w = matrix.$matrix.m44 + x * matrix.$matrix.m14 + y * matrix.$matrix.m24 + z * matrix.$matrix.m34;
-    if (w != 1 && w != 0) {
-        this[0] /= w;
-        this[1] /= w;
-        this[2] /= w;
-    }
-}
-
-J3DIVector3.prototype.toString = function()
-{
-    return "["+this[0]+","+this[1]+","+this[2]+"]";
-}
+/*
+ * quat4.str
+ * Returns a string representation of a quaternion
+ *
+ * Params:
+ * quat - quat4 to represent as a string
+ *
+ * Returns:
+ * string representation of quat
+ */
+quat4.str = function(quat) {
+	return '[' + quat[0] + ', ' + quat[1] + ', ' + quat[2] + ', ' + quat[3] + ']'; 
+};
 """
 
 LOADER = """// TODO: header
@@ -1436,39 +2093,53 @@ JQueryLoader.prototype.loadTexture = function(
 
 RENDERER = """// TODO: header
 
+var lastboundtexture = -1;
+var lastboundvbo = -1;
+var lastboundprogram = -1;
+var last_program_id = 0;
+var last_vbo_id = 0;
+var WebGLDebugUtils;
+
+function log(msg) {
+  if (window.console && window.console.log) {
+    window.console.log(msg);
+  }
+}
+
+function hashcounter(hash) {
+  var size = 0, key;
+  for (key in hash) {
+    if (hash.hasOwnProperty(key)) {
+      size++;
+    }
+  }
+  return size;
+};
+
 function BasicRenderer(params) {
 
-  var canvas = document.getElementById(params['canvas id']);
+  this.programs = [];
+  this.params = params;
+  this.canvas = document.getElementById(params['canvas id']);
 
   // Init OpenGL.
   this.gl = null;
-  try { this.gl = canvas.getContext("moz-webgl"); }
+  try { this.gl = this.canvas.getContext("webgl"); }
   catch (e) { }
-  try { if (!this.gl) this.gl = canvas.getContext("webkit-3d"); }
+  try { if (!this.gl) this.gl = this.canvas.getContext("moz-webgl"); }
+  catch (e) { }
+  try { if (!this.gl) this.gl = this.canvas.getContext("webkit-3d"); }
+  catch (e) { }
+  try { if (!this.gl) this.gl = this.canvas.getContext("experimental-webgl"); }
   catch (e) { }
   if (!this.gl) {
     return;
   }
 
-  // Init shaders.
-  this.gl.program = this.gl.createProgram();
-  this.gl.attachShader(this.gl.program, this.getShader(params['vertex program id']));
-  this.gl.attachShader(this.gl.program, this.getShader(params['fragment program id']));
-  var attributes = params['vertex attribute names'];
-  for (var i in attributes) {
-    this.gl.bindAttribLocation (this.gl.program, parseInt(i), attributes[i]);
+  // Debug context
+  if (WebGLDebugUtils) {
+    this.gl = WebGLDebugUtils.makeDebugContext(this.gl);
   }
-  this.gl.linkProgram(this.gl.program);
-  var linked = this.gl.getProgramParameter(this.gl.program, this.gl.LINK_STATUS);
-  if (!linked) {
-    var error = this.gl.getProgramInfoLog (this.gl.program);
-    alert("Error linking program: " + error);
-    this.gl.deleteProgram(this.gl.program);
-    this.gl.deleteProgram(fragmentShader);
-    this.gl.deleteProgram(vertexShader);
-    return null;
-  }
-  this.gl.useProgram(this.gl.program);
 
   // GL init.
   this.gl.clearColor(
@@ -1483,28 +2154,114 @@ function BasicRenderer(params) {
   this.gl.enableVertexAttribArray(1); // Texture coordinates.
   this.gl.enableVertexAttribArray(2); // Vertices.
 
-  // Shader variable locations and local matrices.
-  this.gl.uniform3f(this.gl.getUniformLocation(
-    this.gl.program, params['light variable']
-  ), 0, 0, 1);
+  // Init camera.
+  this.camerastack = [];
+  this.camerastacklen = 0;
+  var camera = mat4.create();
+  mat4.identity(camera);
+  mat4.lookAt([0, -5, 4], [0, 1, 0], [0, 1, 0], camera);
+  log('camera: ' + mat4.str(camera));
+  this.pushCamera(camera);
+
+  // Init shaders.
+  this.gl.program = this.newProgram(
+    params['vertex program id'], params['fragment program id']
+  );
+}
+
+BasicRenderer.prototype.reshape = function() {
+  this.width = this.canvas.clientWidth;
+  this.height = this.canvas.clientHeight;
+  this.gl.viewport(0, 0, this.width, this.height);
+  this.projectionstack = [];
+  this.projectionstacklen = 0;
+  var projection = mat4.create();
+  mat4.identity(projection);
+  mat4.perspective(35, this.width/this.height, 1, 10000, projection);
+  //mat4.lookAt([0, 0, 7], [0, 0, 0], [0, 1, 0], projection);
+  log('projection1: ' + mat4.str(projection));
+  this.pushProjection(projection);
+  log('projection2: ' + mat4.str(this.projection()));
+}
+
+BasicRenderer.prototype.newProgram = function(vprogid, fprogid) {
+  var program = new Object;
+  program.id = ++last_program_id;
+  program.shader = this.gl.createProgram();
+  var vprog = this.getShader(vprogid);
+  var fprog = this.getShader(fprogid);
+  this.gl.attachShader(program.shader, vprog);
+  this.gl.attachShader(program.shader, fprog);
+  var attributes = this.params['vertex attribute names'];
+  for (var i in attributes) {
+    this.gl.bindAttribLocation (program.shader, parseInt(i), attributes[i]);
+  }
+  this.gl.linkProgram(program.shader);
+  var linked = this.gl.getProgramParameter(program.shader, this.gl.LINK_STATUS);
+  if (!linked) {
+    var error = this.gl.getProgramInfoLog (program.shader);
+    alert("Error linking program: " + error);
+    this.gl.deleteProgram(program.shader);
+    this.gl.deleteProgram(fprog);
+    this.gl.deleteProgram(vprog);
+    return null;
+  }
+  this.gl.useProgram(program.shader);
   this.gl.uniform1i(this.gl.getUniformLocation(
-    this.gl.program, params['sampler2d variable']
+    program.shader, this.params['sampler2d variable']
   ), 0);
-  this.gl.enable(this.gl.TEXTURE_2D);
-  this.gl.mvMatrix = new J3DIMatrix4();
-  this.gl.normalMatrix = new J3DIMatrix4();
-  this.gl.u_normalMatrixLoc = this.gl.getUniformLocation(
-    this.gl.program, params['normal matrix variable']
+  this.gl.uniform1i(this.gl.getUniformLocation(
+    program.shader, this.params['samplercube variable']
+  ), 0);
+  this.gl.uniform3f(this.gl.getUniformLocation(
+    program.shader, this.params['light variable']
+  ), 0, 7, 4);
+  program.u_normalMatrixLoc = this.gl.getUniformLocation(
+    program.shader, this.params['normal matrix variable']
   );
-  this.gl.u_modelViewMatrixLoc = this.gl.getUniformLocation(
-    this.gl.program, params['modelview matrix variable']
+  program.u_modelViewMatrixLoc = this.gl.getUniformLocation(
+    program.shader, this.params['modelview matrix variable']
   );
-  this.gl.u_projMatrixLoc = this.gl.getUniformLocation(
-    this.gl.program, params['projection matrix variable']
+  program.u_projMatrixLoc = this.gl.getUniformLocation(
+    program.shader, this.params['projection matrix variable']
   );
-  this.gl.u_objectMatrixLoc = this.gl.getUniformLocation(
-    this.gl.program, params['object matrix variable']
+  program.u_objectMatrixLoc = this.gl.getUniformLocation(
+    program.shader, this.params['object matrix variable']
   );
+  program.normalMatrix = mat4.create();
+  mat4.identity(program.normalMatrix);
+  this.programs[this.programs.length] = program;
+  return program;
+}
+
+BasicRenderer.prototype.pushCamera = function(camera) {
+  this.camerastack[this.camerastacklen++] = camera;
+}
+
+BasicRenderer.prototype.camera = function() {
+  return this.camerastack[this.camerastacklen-1];
+}
+
+BasicRenderer.prototype.popCamera = function() {
+  var idx = --this.camerastacklen;
+  var rcamera = this.camerastack[idx];
+  delete this.camerastack[idx];
+  return rcamera;
+}
+
+BasicRenderer.prototype.pushProjection = function(projection) {
+  this.projectionstack[this.projectionstacklen++] = projection;
+}
+
+BasicRenderer.prototype.projection = function() {
+  return this.projectionstack[this.projectionstacklen-1];
+}
+
+BasicRenderer.prototype.popProjection = function() {
+  var idx = --this.projectionstacklen;
+  var rprojection = this.projectionstack[idx];
+  delete this.projectionstack[idx];
+  return rprojection;
 }
 
 BasicRenderer.prototype.getShader = function(id) {
@@ -1536,23 +2293,6 @@ BasicRenderer.prototype.getShader = function(id) {
   return shader;
 }
 
-BasicRenderer.prototype.reshape = function(width, height) {
-  var wd2 = width / 2.0;
-  var hd2 = height / 2.0;
-  this.gl.viewport(0-wd2, hd2, wd2, 0-hd2);
-  this.gl.perspectiveMatrix = new J3DIMatrix4();
-  this.gl.perspectiveMatrix.perspective(30, width/height, 1, 10000);
-  this.gl.perspectiveMatrix.lookat(0, 0, 7, 0, 0, 0, 0, 1, 0);
-  this.gl.perspectiveMatrix.setUniform(this.gl, this.gl.u_projMatrixLoc, false);
-  this.gl.mvMatrix.makeIdentity();
-  this.gl.mvMatrix.translate(0,-1,0);
-  this.gl.mvMatrix.rotate(-65, 1,0,0);
-  this.gl.normalMatrix.load(this.gl.mvMatrix);
-  this.gl.normalMatrix.invert();
-  this.gl.normalMatrix.transpose();
-  this.gl.normalMatrix.setUniform(this.gl, this.gl.u_normalMatrixLoc, false);
-}
-
 BasicRenderer.prototype.standardTexture = function(image, args) {
   var gl = args[0];
   var texture = gl.createTexture();
@@ -1563,94 +2303,137 @@ BasicRenderer.prototype.standardTexture = function(image, args) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.bindTexture(gl.TEXTURE_2D, null);
   //gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindTexture(gl.TEXTURE_2D, null);
   return texture;
 }
 
 BasicRenderer.prototype.standardVBO = function(data, args) {
 
-  var gl = args[0];
+  var renderer = args[0];
+  var gl = renderer.gl;
   var vbo = new StandardVBO();
 
-  // Create vertex VBO.
+  // Vertex buffer.
   vbo.vertexData = data["vertices"];
-  vbo.vertices = new Float32Array(vbo.vertexData);
   vbo.vertexObject = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, vbo.vertexObject);
-  gl.bufferData(gl.ARRAY_BUFFER, vbo.vertices, gl.STATIC_DRAW);
 
-  // Create normals VBO.
+  // Normals buffer.
   vbo.normalsData = data["normals"];
-  vbo.normals = new Float32Array(vbo.normalsData);
   vbo.normalsObject = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, vbo.normalsObject);
-  gl.bufferData(gl.ARRAY_BUFFER, vbo.normals, gl.STATIC_DRAW);
 
-  // Create texcoords VBO.
+  // Texcoords buffer.
   vbo.texcoordsData = data["texcoords"];
   if (vbo.texcoordsData) {
-    vbo.texcoords = new Float32Array(vbo.texcoordsData);
     vbo.texcoordsObject = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo.texcoordsObject);
-    gl.bufferData(gl.ARRAY_BUFFER, vbo.texcoords, gl.STATIC_DRAW);
   }
   else {
     vbo.texcoordsObject = null;
   }
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-
-  // Create indices.
+  // Index buffer.
   vbo.indicesData = data["indices"];
-  vbo.indices = new Uint16Array(vbo.indicesData);
   vbo.indicesObject = gl.createBuffer();
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vbo.indicesObject);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, vbo.indices, gl.STATIC_DRAW);
 
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-
-  // Accounting.
-  vbo.vertexCount = vbo.indicesData.length;
-
+  renderer.updateVBO(vbo);
+  
   return vbo;
 }
 
-var lastboundtexture = -1;
-var lastboundvbo = -1;
-BasicRenderer.prototype.renderMesh = function(vbo, texture) {
-  if (vbo.id != lastboundvbo) {
-    if (!vbo.bind(this.gl)) return;
-    lastboundvbo = vbo.id;
+BasicRenderer.prototype.updateVBO = function(vbo) {
+  var gl = this.gl;
+  vbo.vertices = new Float32Array(vbo.vertexData);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo.vertexObject);
+  gl.bufferData(gl.ARRAY_BUFFER, vbo.vertices, gl.STATIC_DRAW);
+  vbo.normals = new Float32Array(vbo.normalsData);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo.normalsObject);
+  gl.bufferData(gl.ARRAY_BUFFER, vbo.normals, gl.STATIC_DRAW);
+  if (vbo.texcoordsData) {
+    vbo.texcoords = new Float32Array(vbo.texcoordsData);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo.texcoordsObject);
+    gl.bufferData(gl.ARRAY_BUFFER, vbo.texcoords, gl.STATIC_DRAW);
   }
-  if (texture != lastboundtexture) {
-    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-    lastboundtexture = texture;
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  vbo.indices = new Uint16Array(vbo.indicesData);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vbo.indicesObject);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, vbo.indices, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+  vbo.vertexCount = vbo.indicesData.length;
+}
+
+BasicRenderer.prototype.renderMesh = function(mesh) {
+  if (mesh.program) {
+    var program = mesh.program;
+    var changed = (lastboundprogram != mesh.program.id);
   }
-  this.gl.drawElements(this.gl.TRIANGLES, vbo.vertexCount, this.gl.UNSIGNED_SHORT, 0);
+  else {
+    var program = this.gl.program;
+    var changed = (lastboundprogram != this.gl.program.id);
+  }
+  if (changed) {
+    this.gl.useProgram(program.shader);
+    lastboundprogram = program.id;
+  }
+  if (mesh.vbo.id != lastboundvbo) {
+    if (!mesh.vbo.bind(this.gl)) return;
+    lastboundvbo = mesh.vbo.id;
+  }
+  if (mesh.texture != lastboundtexture) {
+    this.gl.bindTexture(this.gl.TEXTURE_2D, mesh.texture);
+    lastboundtexture = mesh.texture;
+  }
+  //log('camera: ' + mat4.str(this.camera()));
+  //log('projection: ' + mat4.str(this.projection()));
+  this.gl.uniformMatrix4fv(program.u_projMatrixLoc, false, this.projection());
+  this.gl.uniformMatrix4fv(program.u_modelViewMatrixLoc, false, this.camera());
+  this.gl.uniformMatrix4fv(program.u_objectMatrixLoc, false, mesh.objectMatrix);
+  this.gl.uniformMatrix4fv(program.u_normalMatrixLoc, false, program.normalMatrix);
+  this.gl.drawElements(this.gl.TRIANGLES, mesh.vbo.vertexCount, this.gl.UNSIGNED_SHORT, 0);
+}
+
+BasicRenderer.prototype.setObjectMatrix = function(mesh) {
+  if (!mesh.objectMatrix) {
+    mesh.objectMatrix = mat4.create();
+  }
+  mat4.identity(mesh.objectMatrix);
+  mat4.translate(mesh.objectMatrix, [mesh.translate[0], mesh.translate[1], mesh.translate[2]]);
+  mat4.rotate(mesh.objectMatrix, mesh.rotate[2] * Math.PI / 180.0, [0.0, 0.0, 1.0]);
+  mat4.rotate(mesh.objectMatrix, mesh.rotate[1] * Math.PI / 180.0, [0.0, 1.0, 0.0]);
+  mat4.rotate(mesh.objectMatrix, mesh.rotate[0] * Math.PI / 180.0, [1.0, 0.0, 0.0]);
+  mat4.scale(mesh.objectMatrix, [mesh.scale[0], mesh.scale[1], mesh.scale[2]]);
+}
+
+BasicRenderer.prototype.prepareMeshes = function(scene) {
+  for (i in scene.meshes) {
+    var mesh = scene.meshes[i];
+    this.setObjectMatrix(mesh);
+    log(i + ': ' + mat4.str(mesh.objectMatrix));
+    mesh.texture = scene.textures[mesh.textureID];
+  }
 }
 
 BasicRenderer.prototype.render = function(scene) {
-  this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
-  this.gl.mvMatrix.rotate(.5, 0,0,1);
-  this.gl.mvMatrix.setUniform(this.gl, this.gl.u_modelViewMatrixLoc, false);
+  var clear = true;
+  if (arguments.length > 1) {
+    clear = arguments[1];
+  }
+  if (clear) {
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+  }
+  var camera = this.camera();
+  mat4.set(camera, this.gl.program.normalMatrix);
+  mat4.toInverseMat3(this.gl.program.normalMatrix);
+  mat4.transpose(this.gl.program.normalMatrix);
+  for (i in this.programs) {
+    var program = this.programs[i];
+    if (program.id == this.gl.program.id) continue;
+    mat4.set(this.gl.program.normalMatrix, program.normalMatrix);
+  }
   for (i in scene.meshes) {
-    var mesh = scene.meshes[i];
-    if (!mesh.objectMatrix) {
-      mesh.objectMatrix = new J3DIMatrix4();
-      mesh.objectMatrix.translate(mesh.translate[0], mesh.translate[1], mesh.translate[2])
-      mesh.objectMatrix.rotate(mesh.rotate[2], 0.0, 0.0, 1.0);
-      mesh.objectMatrix.rotate(mesh.rotate[1], 0.0, 1.0, 0.0);
-      mesh.objectMatrix.rotate(mesh.rotate[0], 1.0, 0.0, 0.0);
-      mesh.objectMatrix.scale(mesh.scale[0], mesh.scale[1], mesh.scale[2])
-      mesh.texture = scene.textures[mesh.textureID];
-    }
-    mesh.objectMatrix.setUniform(this.gl, this.gl.u_objectMatrixLoc, false);
-    this.renderMesh(mesh.vbo, mesh.texture);
+    this.renderMesh(scene.meshes[i]);
   }
 }
 
-last_vbo_id = 0;
 function StandardVBO() {
   this.id = ++last_vbo_id;
 }
@@ -1664,6 +2447,65 @@ StandardVBO.prototype.bind = function(gl) {
   gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indicesObject);
   return true;
+}
+
+BasicRenderer.prototype._rewriteMeshData = function(data, matrix) {
+  var newdata = [];
+  var numvertices = data.length / 3;
+  for (var i = 0; i < numvertices; i++) {
+    var index = i * 3;
+    var vector = vec3.create([data[index+0], data[index+1], data[index+2]]);
+    mat4.multiplyVec3(matrix, vector);
+    newdata[newdata.length] = vector[0];
+    newdata[newdata.length] = vector[1];
+    newdata[newdata.length] = vector[2];
+  }
+  return newdata;
+}
+
+BasicRenderer.prototype._rewriteIndices = function(data, base) {
+  var newdata = [];
+  for (var i in data) {
+    newdata[i] = data[i] + base;
+  }
+  return newdata;
+}
+
+BasicRenderer.prototype.combineMeshes = function(name, meshes, meshlist) {
+  var combinedmesh = new Mesh({
+    "translate": [0, 0, 0],
+    "rotate": [0, 0, 0],
+    "scale": [1, 1, 1],
+  });
+  var vertexData = [];
+  var texcoordsData = [];
+  var normalsData = [];
+  var indicesData = [];
+  var indexBase = 0;
+  for (i in meshlist) {
+    var meshname = meshlist[i];
+    if (!meshname) continue;
+    var mesh = meshes[meshname];
+    if (!mesh) continue;
+    vertexData = vertexData.concat(this._rewriteMeshData(mesh.vbo.vertexData, mesh.objectMatrix));
+    texcoordsData = texcoordsData.concat(mesh.vbo.texcoordsData);
+    normalsData = normalsData.concat(mesh.vbo.normalsData);
+    indicesData = indicesData.concat(this._rewriteIndices(mesh.vbo.indicesData, indexBase));
+    combinedmesh.textureID = mesh.textureID;
+    combinedmesh.texture = mesh.texture;
+    indexBase += mesh.vbo.vertexData.length / 3;
+    delete meshes[meshname];
+  }
+  data = {
+    "vertices": vertexData,
+    "texcoords": texcoordsData,
+    "normals": normalsData,
+    "indices": indicesData
+  };
+  combinedmesh.vbo = this.standardVBO(data, [this]);
+  this.setObjectMatrix(combinedmesh);
+  meshes[name] = combinedmesh;
+  return combinedmesh;
 }
 """
 
@@ -1732,7 +2574,7 @@ HTML = """<html>
       <noscript><p>This application requires a browser with WebGL support.</p></noscript>
     </div>
     <script type='text/javascript' src='http://code.jquery.com/jquery-1.4.3.min.js'></script>
-    <script type='text/javascript' src='js/J3DIMath.js'></script>
+    <script type='text/javascript' src='js/glMatrix.js'></script>
     <script type='text/javascript' src='js/webgl-jso-jqueryloader.js'></script>
     <script type='text/javascript' src='js/webgl-jso-basicrenderer.js'></script>
     <script type='text/javascript' src='${{SCENEFILE}}'></script>
@@ -1764,9 +2606,8 @@ HTML = """<html>
       void main() {
         vec2 texCoord = vec2(v_texCoord.s, 1.0 - v_texCoord.t);
         vec4 color = texture2D(sampler2d, texCoord);
-        //color *= vec4(2.0, 2.0, 2.0, 0.0);
-        color.a = 1.0;
-        gl_FragColor = vec4(color.xyz * v_Dot, color.a);
+        //gl_FragColor = vec4(color.xyz * v_Dot, 1.0);
+        gl_FragColor = vec4(color.xyz, 1.0);
       }
     </script>
     <script type='text/javascript'>
@@ -1801,7 +2642,7 @@ HTML = """<html>
           'texture callback': renderer.standardTexture,
           'texture arguments': [ renderer.gl ],
           'vbo callback': renderer.standardVBO,
-          'vbo arguments': [ renderer.gl ]
+          'vbo arguments': [ renderer ]
         });
 
         // Loader object loads images, JS objects, and reports loading status.
@@ -1814,15 +2655,17 @@ HTML = """<html>
             var canvas = $('#canvas3d');
             $('#canvas-wrapper').css('display', 'block');
             canvas.css('display', 'block');
+            renderer.prepareMeshes(scene);
             renderer.reshape(canvas.width(), canvas.height());
             setInterval(function() {
               // Main loop.
+	      mat4.rotate(renderer.camera(), 0.5 * Math.PI / 180.0, [0,0,1]);
               renderer.render(scene);
             }, 25);
           }
         });
 
-      // Everything's ready, display the loading box and load.
+        // Everything's ready, display the loading box and load.
         $('#loadbox').css('display', 'block');
         scene.load(loader);
 
