@@ -2093,9 +2093,9 @@ JQueryLoader.prototype.loadTexture = function(
 
 RENDERER = """// TODO: header
 
-var lastboundtexture = -1;
-var lastboundvbo = -1;
-var lastboundprogram = -1;
+var lastboundtexture = false;
+var lastboundvbo = false;
+var lastboundprogram = false;
 var last_program_id = 0;
 var last_vbo_id = 0;
 var WebGLDebugUtils;
@@ -2297,6 +2297,7 @@ BasicRenderer.prototype.standardTexture = function(image, args) {
   var gl = args[0];
   var texture = gl.createTexture();
   texture.image = image;
+  texture.target = gl.TEXTURE_2D;
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -2379,7 +2380,10 @@ BasicRenderer.prototype.renderMesh = function(mesh) {
     lastboundvbo = mesh.vbo.id;
   }
   if (mesh.texture != lastboundtexture) {
-    this.gl.bindTexture(this.gl.TEXTURE_2D, mesh.texture);
+    if (lastboundtexture) {
+      renderer.gl.bindTexture(lastboundtexture.target, null);
+    }
+    this.gl.bindTexture(mesh.texture.target, mesh.texture);
     lastboundtexture = mesh.texture;
   }
   //log('camera: ' + mat4.str(this.camera()));
